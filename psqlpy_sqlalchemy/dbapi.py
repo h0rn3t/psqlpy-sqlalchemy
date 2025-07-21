@@ -29,8 +29,49 @@ class PSQLPyAdaptDBAPI:
 
     def connect(self, *arg, **kw):
         creator_fn = kw.pop("async_creator_fn", self.psqlpy.connect)
+
+        # Handle server_settings parameter that SQLAlchemy might pass
+        server_settings = kw.pop("server_settings", None)
+        if server_settings:
+            # Map server_settings to individual psqlpy parameters
+            if "application_name" in server_settings:
+                kw["application_name"] = server_settings["application_name"]
+            # Add other server_settings mappings as needed
+
+        # Filter out any other unsupported parameters that SQLAlchemy might pass
+        supported_params = {
+            "dsn",
+            "username",
+            "password",
+            "host",
+            "hosts",
+            "port",
+            "ports",
+            "db_name",
+            "target_session_attrs",
+            "options",
+            "application_name",
+            "connect_timeout_sec",
+            "connect_timeout_nanosec",
+            "tcp_user_timeout_sec",
+            "tcp_user_timeout_nanosec",
+            "keepalives",
+            "keepalives_idle_sec",
+            "keepalives_idle_nanosec",
+            "keepalives_interval_sec",
+            "keepalives_interval_nanosec",
+            "keepalives_retries",
+            "load_balance_hosts",
+            "max_db_pool_size",
+            "conn_recycling_method",
+            "ssl_mode",
+            "ca_file",
+        }
+
+        filtered_kw = {k: v for k, v in kw.items() if k in supported_params}
+
         return AsyncAdapt_psqlpy_connection(
-            self, await_only(creator_fn(*arg, **kw))
+            self, await_only(creator_fn(*arg, **filtered_kw))
         )
 
 
