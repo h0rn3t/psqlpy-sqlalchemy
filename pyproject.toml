@@ -40,6 +40,13 @@ dev = [
     "mypy>=1.0.0",
     "sqlmodel>=0.0.8",
     "pytest-cov",
+    "fastapi>=0.68.0",
+    "starlette>=0.14.0",
+    "fastapi-async-sqlalchemy>=0.3.0",
+]
+fastapi = [
+    "fastapi>=0.68.0",
+    "starlette>=0.14.0",
 ]
 
 [project.urls]
