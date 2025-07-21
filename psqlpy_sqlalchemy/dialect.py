@@ -49,7 +49,9 @@ class PsqlpyDialect(default.DefaultDialect):
         """Import the psqlpy module as DBAPI"""
         return PsqlpyDBAPI()
 
-    def create_connect_args(self, url: URL) -> Tuple[List[Any], Dict[str, Any]]:
+    def create_connect_args(
+        self, url: URL
+    ) -> Tuple[List[Any], Dict[str, Any]]:
         """Create connection arguments from SQLAlchemy URL"""
         opts = {}
 
@@ -73,7 +75,9 @@ class PsqlpyDialect(default.DefaultDialect):
 
                 # Map common PostgreSQL connection parameters
                 if key == "sslmode":
-                    opts["ssl_mode"] = getattr(psqlpy.SslMode, value.upper(), None)
+                    opts["ssl_mode"] = getattr(
+                        psqlpy.SslMode, value.upper(), None
+                    )
                 elif key == "application_name":
                     opts["application_name"] = value
                 elif key == "connect_timeout":

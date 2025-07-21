@@ -39,7 +39,8 @@ class TestPsqlpyDBAPI(unittest.TestCase):
 
         for exc_name in exceptions:
             self.assertTrue(
-                hasattr(self.dbapi, exc_name), f"Missing DBAPI exception: {exc_name}"
+                hasattr(self.dbapi, exc_name),
+                f"Missing DBAPI exception: {exc_name}",
             )
             exc_class = getattr(self.dbapi, exc_name)
             self.assertTrue(

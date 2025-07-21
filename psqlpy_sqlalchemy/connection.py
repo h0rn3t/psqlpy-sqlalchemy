@@ -28,16 +28,20 @@ class PsqlpyCursor:
             if parameters is None:
                 self._result = self._psqlpy_connection.fetch(query)
             else:
-                # Convert parameters to psqlpy format if needed
                 if isinstance(parameters, (list, tuple)):
-                    # Convert positional parameters to named parameters
-                    # This is a simplified conversion - in practice, you might need more
-                    # sophisticated handling
-                    param_dict = {f"param_{i}": val for i, val in enumerate(parameters)}
-                    query = self._convert_positional_to_named(query, len(parameters))
-                    self._result = self._psqlpy_connection.fetch(query, param_dict)
+                    param_dict = {
+                        f"param_{i}": val for i, val in enumerate(parameters)
+                    }
+                    query = self._convert_positional_to_named(
+                        query, len(parameters)
+                    )
+                    self._result = self._psqlpy_connection.fetch(
+                        query, param_dict
+                    )
                 else:
-                    self._result = self._psqlpy_connection.fetch(query, parameters)
+                    self._result = self._psqlpy_connection.fetch(
+                        query, parameters
+                    )
 
             # Process the result
             if self._result:
@@ -66,11 +70,11 @@ class PsqlpyCursor:
         except Exception as e:
             raise self._convert_exception(e)
 
-    def executemany(self, query: str, parameters_list: List[Union[dict, list, tuple]]):
+    def executemany(
+        self, query: str, parameters_list: List[Union[dict, list, tuple]]
+    ):
         """Execute a query multiple times with different parameters"""
         try:
-            # For executemany, we'll execute each set of parameters individually
-            # In a more sophisticated implementation, you might use psqlpy's batch execution
             total_rowcount = 0
             for parameters in parameters_list:
                 self.execute(query, parameters)
@@ -133,10 +137,10 @@ class PsqlpyCursor:
         self.rowcount = -1
         self.description = None
 
-    def _convert_positional_to_named(self, query: str, param_count: int) -> str:
-        """Convert positional parameters (?) to named parameters (%(param_N)s)"""
-        # This is a simplified implementation
-        # In practice, you'd need more sophisticated SQL parsing
+    def _convert_positional_to_named(
+        self, query: str, param_count: int
+    ) -> str:
+        "Convert positional parameters (?) to named parameters (%(param_N)s)"
         result = query
         for i in range(param_count):
             result = result.replace("?", f"%(param_{i})s", 1)

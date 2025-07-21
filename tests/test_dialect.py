@@ -5,7 +5,15 @@ Unit tests for psqlpy-sqlalchemy dialect
 
 import unittest
 
-from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, text
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    text,
+)
 from sqlalchemy.schema import CreateTable
 
 
@@ -37,11 +45,13 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test connection string parsing"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://testuser:testpass@localhost:5432/testdb?sslmode=require"
+                "postgresql+psqlpy://testuser:testpass@localhost:5432/testdb?sslmode=require"  # noqa
             )
 
             # Test create_connect_args
-            args, kwargs = self.engine.dialect.create_connect_args(self.engine.url)
+            args, kwargs = self.engine.dialect.create_connect_args(
+                self.engine.url
+            )
 
             self.assertIsInstance(args, list)
             self.assertIsInstance(kwargs, dict)
@@ -49,7 +59,9 @@ class TestPsqlpyDialect(unittest.TestCase):
             # Check expected connection parameters
             expected_keys = ["host", "port", "db_name", "username", "password"]
             for key in expected_keys:
-                self.assertIn(key, kwargs, f"Missing connection parameter: {key}")
+                self.assertIn(
+                    key, kwargs, f"Missing connection parameter: {key}"
+                )
 
             # Verify specific values
             self.assertEqual(kwargs["host"], "localhost")
@@ -124,7 +136,8 @@ class TestPsqlpyDialect(unittest.TestCase):
 
             for exc_name in exceptions:
                 self.assertTrue(
-                    hasattr(dbapi, exc_name), f"Missing DBAPI exception: {exc_name}"
+                    hasattr(dbapi, exc_name),
+                    f"Missing DBAPI exception: {exc_name}",
                 )
 
         except Exception as e:
@@ -137,13 +150,13 @@ class TestPsqlpyDialect(unittest.TestCase):
                 "postgresql+psqlpy://user:password@localhost/test"
             )
 
-            # This will fail because we don't have a real database,
-            # but we can test that the connection creation process starts correctly
             try:
                 connection = self.engine.connect()
                 # If we get here, connection succeeded unexpectedly
                 connection.close()
-                self.fail("Connection succeeded unexpectedly without a real database")
+                self.fail(
+                    "Connection succeeded unexpectedly without a real database"
+                )
             except Exception:
                 # This is expected - we don't have a real database
                 # The test passes if an exception is raised
