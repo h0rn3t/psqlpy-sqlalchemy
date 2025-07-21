@@ -25,17 +25,26 @@ class TestPsqlpyDBAPI(unittest.TestCase):
     def test_exception_hierarchy(self):
         """Test that all required DBAPI exceptions are available"""
         exceptions = [
-            'Warning', 'Error', 'InterfaceError', 'DatabaseError',
-            'DataError', 'OperationalError', 'IntegrityError',
-            'InternalError', 'ProgrammingError', 'NotSupportedError'
+            "Warning",
+            "Error",
+            "InterfaceError",
+            "DatabaseError",
+            "DataError",
+            "OperationalError",
+            "IntegrityError",
+            "InternalError",
+            "ProgrammingError",
+            "NotSupportedError",
         ]
-        
+
         for exc_name in exceptions:
-            self.assertTrue(hasattr(self.dbapi, exc_name), 
-                          f"Missing DBAPI exception: {exc_name}")
+            self.assertTrue(
+                hasattr(self.dbapi, exc_name), f"Missing DBAPI exception: {exc_name}"
+            )
             exc_class = getattr(self.dbapi, exc_name)
-            self.assertTrue(callable(exc_class), 
-                          f"Exception {exc_name} is not callable")
+            self.assertTrue(
+                callable(exc_class), f"Exception {exc_name} is not callable"
+            )
 
     def test_type_constructors(self):
         """Test DBAPI type constructors"""
@@ -86,15 +95,15 @@ class TestPsqlpyDBAPI(unittest.TestCase):
 
         # Get current timestamp
         current_time = time.time()
-        
+
         # Test DateFromTicks
         date_from_ticks = self.dbapi.DateFromTicks(current_time)
         self.assertIsInstance(date_from_ticks, datetime.date)
-        
+
         # Test TimeFromTicks
         time_from_ticks = self.dbapi.TimeFromTicks(current_time)
         self.assertIsInstance(time_from_ticks, datetime.time)
-        
+
         # Test TimestampFromTicks
         timestamp_from_ticks = self.dbapi.TimestampFromTicks(current_time)
         self.assertIsInstance(timestamp_from_ticks, datetime.datetime)
@@ -109,9 +118,9 @@ class TestPsqlpyDBAPI(unittest.TestCase):
 
     def test_connect_method_exists(self):
         """Test that connect method exists"""
-        self.assertTrue(hasattr(self.dbapi, 'connect'))
+        self.assertTrue(hasattr(self.dbapi, "connect"))
         self.assertTrue(callable(self.dbapi.connect))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

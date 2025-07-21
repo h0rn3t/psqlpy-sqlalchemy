@@ -2,7 +2,7 @@
 DBAPI-compatible connection and cursor wrappers for psqlpy
 """
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import psqlpy
 
@@ -31,7 +31,8 @@ class PsqlpyCursor:
                 # Convert parameters to psqlpy format if needed
                 if isinstance(parameters, (list, tuple)):
                     # Convert positional parameters to named parameters
-                    # This is a simplified conversion - in practice, you might need more sophisticated handling
+                    # This is a simplified conversion - in practice, you might need more
+                    # sophisticated handling
                     param_dict = {f"param_{i}": val for i, val in enumerate(parameters)}
                     query = self._convert_positional_to_named(query, len(parameters))
                     self._result = self._psqlpy_connection.fetch(query, param_dict)
@@ -171,7 +172,8 @@ class PsqlpyConnection:
         # If we're in a transaction, we need to commit it
         if self._in_transaction:
             try:
-                # This is a simplified approach - in practice you'd track transactions better
+                # This is a simplified approach - in practice you'd track
+                # transactions better
                 cursor = self.cursor()
                 cursor.execute("COMMIT")
                 self._in_transaction = False
@@ -196,7 +198,7 @@ class PsqlpyConnection:
         if not self._closed:
             try:
                 self._psqlpy_connection.close()
-            except:
+            except Exception:
                 pass  # Ignore errors on close
             self._closed = True
 

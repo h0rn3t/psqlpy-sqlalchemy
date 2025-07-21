@@ -2,7 +2,6 @@
 DBAPI-compatible interface for psqlpy
 """
 
-from typing import Any, Optional
 
 import psqlpy
 

@@ -2,14 +2,11 @@
 SQLAlchemy dialect for psqlpy
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Dict, List, Tuple
 
 import psqlpy
-from sqlalchemy import pool, util
-from sqlalchemy.engine import default, interfaces
+from sqlalchemy.engine import default
 from sqlalchemy.engine.url import URL
-from sqlalchemy.sql import sqltypes
 
 from .connection import PsqlpyConnection
 from .dbapi import PsqlpyDBAPI
@@ -148,7 +145,7 @@ class PsqlpyDialect(default.DefaultDialect):
             if result:
                 level = result[0].upper().replace(" ", "_")
                 return level
-        except:
+        except Exception:
             pass
         return self.default_isolation_level
 
@@ -171,7 +168,8 @@ class PsqlpyDialect(default.DefaultDialect):
         """Convert psqlpy exceptions to appropriate DBAPI exceptions"""
         if isinstance(e, psqlpy.Error):
             # For now, just re-raise as is
-            # In a full implementation, we'd map to specific DBAPI exception types
+            # In a full implementation, we'd map to specific DBAPI
+            # exception types
             return e
         return e
 
