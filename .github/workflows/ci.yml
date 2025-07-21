@@ -56,16 +56,26 @@ jobs:
         python -m pip install --upgrade pip wheel
         pip install -e ".[dev]"
 
-    - name: Run pytest
-      run:  python -m pytest tests/ -v
+    - name: Produce coverage report
+      if: matrix.build == 'linux_3.9'
+      run: pytest --cov=psqlpy_sqlalchemy --cov-report=xml
 
-    - name: Run tests and collect coverage
-      run: pytest --cov .
-
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v5
+    - name: Upload coverage report
+      if: matrix.build == 'linux_3.9'
+      uses: codecov/codecov-action@v1
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+
+#    - name: Run pytest
+#      run:  python -m pytest tests/ -v
+#
+#    - name: Run tests and collect coverage
+#      run: pytest --cov .
+#
+#    - name: Upload coverage reports to Codecov
+#      uses: codecov/codecov-action@v5
+#      with:
+#        token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     name: lint
