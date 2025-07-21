@@ -6,7 +6,6 @@ Tests for SQLModel compatibility with psqlpy-sqlalchemy dialect
 import unittest
 from typing import Optional
 
-import pytest
 from sqlalchemy import create_engine
 from sqlmodel import Field, Session, SQLModel, select
 
@@ -180,19 +179,15 @@ class TestSQLModelCompatibility(unittest.TestCase):
             Team.metadata.drop_all(self.engine)
 
 
-class TestPsqlpyDialectWithSQLModel(unittest.TestCase):
-    """Test cases for psqlpy dialect with SQLModel"""
+class TestSQLiteDialectWithSQLModel(unittest.TestCase):
+    """Test cases for SQLite dialect with SQLModel"""
 
-    @pytest.mark.skip("Requires a running PostgreSQL server")
-    def test_psqlpy_dialect_with_sqlmodel(self):
-        """Test using psqlpy dialect with SQLModel"""
-        # This test requires a running PostgreSQL server
-        # It's marked as skipped by default
+    def test_sqlite_dialect_with_sqlmodel(self):
+        """Test using SQLite dialect with SQLModel"""
+        # This test uses SQLite in-memory database for testing
 
-        # Create engine with psqlpy dialect
-        engine = create_engine(
-            "postgresql+psqlpy://user:password@localhost/dbname"
-        )
+        # Create engine with SQLite dialect
+        engine = create_engine("sqlite:///:memory:")
 
         # Create all tables
         SQLModel.metadata.create_all(engine)
