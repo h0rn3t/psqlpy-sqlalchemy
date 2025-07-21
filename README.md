@@ -1,6 +1,6 @@
 # psqlpy-sqlalchemy
 [![ci](https://img.shields.io/badge/Support-Ukraine-FFD500?style=flat&labelColor=005BBB)](https://img.shields.io/badge/Support-Ukraine-FFD500?style=flat&labelColor=005BBB)
-[![ci](https://github.com/h0rn3t/fastapi-async-sqlalchemy/workflows/ci/badge.svg)](https://github.com/h0rn3t/psqlpy_sqlalchemy/workflows/ci/badge.svg)
+[![ci](https://github.com/h0rn3t/psqlpy-sqlalchemy/workflows/ci/badge.svg)](https://github.com/h0rn3t/psqlpy-sqlalchemy/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/h0rn3t/psqlpy-sqlalchemy/graph/badge.svg?token=tZoyeATPa2)](https://codecov.io/gh/h0rn3t/psqlpy-sqlalchemy)[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![pip](https://img.shields.io/pypi/v/psqlpy-sqlalchemy?color=blue)](https://pypi.org/project/psqlpy-sqlalchemy/)
 [![Updates](https://pyup.io/repos/github/h0rn3t/psqlpy-sqlalchemy/shield.svg)](https://pyup.io/repos/github/h0rn3t/psqlpy-sqlalchemy/)
