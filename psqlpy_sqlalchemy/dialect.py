@@ -6,12 +6,28 @@ import psqlpy
 from sqlalchemy import URL, util
 from sqlalchemy.dialects.postgresql.base import INTERVAL, PGDialect
 from sqlalchemy.dialects.postgresql.json import JSONPathType
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 from sqlalchemy.sql import operators, sqltypes
 from sqlalchemy.sql.functions import GenericFunction
 
 from .connection import AsyncAdapt_psqlpy_connection, PGExecutionContext_psqlpy
 from .dbapi import PSQLPyAdaptDBAPI
+
+
+class CompatibleNullPool(NullPool):
+    """
+    A NullPool wrapper that accepts but ignores pool sizing arguments.
+    
+    This class is used to maintain compatibility with middleware that passes
+    pool_size and max_overflow arguments, which are not valid for NullPool
+    but are commonly passed by frameworks like FastAPI with fastapi_async_sqlalchemy.
+    """
+    
+    def __init__(self, creator, pool_size=None, max_overflow=None, **kw):
+        # Filter out pool sizing arguments that NullPool doesn't accept
+        filtered_kw = {k: v for k, v in kw.items() 
+                      if k not in ('pool_size', 'max_overflow')}
+        super().__init__(creator, **filtered_kw)
 
 
 # JSONB aggregation functions
@@ -262,6 +278,7 @@ class PSQLPyAsyncDialect(PGDialect):
             "SERIALIZABLE": psqlpy.IsolationLevel.Serializable,
         }
 
+
     def create_connect_args(
         self,
         url: URL,
@@ -305,3 +322,6 @@ dialect = PSQLPyAsyncDialect
 
 # Backward compatibility alias for entry point system
 PsqlpyDialect = PSQLPyAsyncDialect
+
+# Export the compatible pool class for users who need it
+__all__ = ['PSQLPyAsyncDialect', 'PsqlpyDialect', 'CompatibleNullPool']

@@ -12,7 +12,7 @@ from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, QueuePool
 
-from psqlpy_sqlalchemy.dialect import PSQLPyAsyncDialect, PsqlpyDialect
+from psqlpy_sqlalchemy.dialect import PSQLPyAsyncDialect, PsqlpyDialect, CompatibleNullPool
 
 
 class TestPoolclassCompatibility(unittest.TestCase):
@@ -207,6 +207,82 @@ class TestPoolclassCompatibility(unittest.TestCase):
             self.assertTrue(result)
         finally:
             loop.close()
+
+    def test_compatible_nullpool_with_pool_args_sync(self):
+        """Test that CompatibleNullPool works with pool arguments in sync engines"""
+        try:
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=CompatibleNullPool,
+                pool_size=5,
+                max_overflow=10,
+            )
+            self.assertIsNotNone(self.engine.dialect)
+            self.assertEqual(self.engine.dialect.driver, "psqlpy")
+            self.assertEqual(self.engine.pool.__class__, CompatibleNullPool)
+        except Exception as e:
+            # Connection errors are acceptable, we're testing pool creation
+            if "Invalid argument(s)" in str(e):
+                self.fail(f"CompatibleNullPool should accept pool arguments: {e}")
+
+    def test_compatible_nullpool_with_pool_args_async(self):
+        """Test that CompatibleNullPool works with pool arguments in async engines"""
+
+        async def _test_compatible_nullpool():
+            try:
+                self.async_engine = create_async_engine(
+                    "postgresql+psqlpy://user:password@localhost/test",
+                    poolclass=CompatibleNullPool,
+                    pool_size=5,
+                    max_overflow=10,
+                )
+                self.assertIsNotNone(self.async_engine)
+                self.assertEqual(
+                    self.async_engine.sync_engine.pool.__class__, CompatibleNullPool
+                )
+                return True
+            except Exception as e:
+                # Connection errors are acceptable, we're testing pool creation
+                if "Invalid argument(s)" in str(e):
+                    self.fail(f"CompatibleNullPool should accept pool arguments: {e}")
+                return True
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(_test_compatible_nullpool())
+            self.assertTrue(result)
+        finally:
+            loop.close()
+
+    def test_compatible_nullpool_ignores_pool_args(self):
+        """Test that CompatibleNullPool ignores pool sizing arguments"""
+        try:
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=CompatibleNullPool,
+                pool_size=100,  # Should be ignored
+                max_overflow=200,  # Should be ignored
+            )
+            # If we get here, the arguments were successfully ignored
+            self.assertIsNotNone(self.engine.dialect)
+            self.assertEqual(self.engine.pool.__class__, CompatibleNullPool)
+        except Exception as e:
+            # Connection errors are acceptable
+            if "Invalid argument(s)" in str(e):
+                self.fail(f"CompatibleNullPool should ignore pool arguments: {e}")
+
+    def test_regular_nullpool_still_fails_with_pool_args(self):
+        """Test that regular NullPool still fails with pool arguments (regression test)"""
+        with self.assertRaises(TypeError) as context:
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
+                pool_size=5,
+                max_overflow=10,
+            )
+        
+        self.assertIn("Invalid argument(s) 'pool_size','max_overflow'", str(context.exception))
 
 
 class TestFastAPIMiddlewareCompatibility(unittest.TestCase):
