@@ -1,228 +1,236 @@
-from typing import List, Optional, Tuple, Union
+import typing as t
+from collections import deque
+from typing import Any, Optional, Tuple
 
 import psqlpy
+from psqlpy import row_factories
+from sqlalchemy.connectors.asyncio import (
+    AsyncAdapt_dbapi_connection,
+    AsyncAdapt_dbapi_cursor,
+    AsyncAdapt_dbapi_ss_cursor,
+)
+from sqlalchemy.dialects.postgresql.base import PGExecutionContext
+from sqlalchemy.util.concurrency import await_only
+
+if t.TYPE_CHECKING:
+    from sqlalchemy.engine.interfaces import (
+        DBAPICursor,
+        _DBAPICursorDescription,
+    )
 
 
-class PsqlpyCursor:
-    """DBAPI-compatible cursor wrapper for psqlpy"""
-
-    def __init__(self, connection: "PsqlpyConnection"):
-        self.connection = connection
-        self._psqlpy_connection = connection._psqlpy_connection
-        self._result = None
-        self._rows = None
-        self._row_index = 0
-        self.rowcount = -1
-        self.description = None
-        self.arraysize = 1
-
-    def execute(
-        self, query: str, parameters: Optional[Union[dict, list, tuple]] = None
-    ):
-        """Execute a query with optional parameters"""
-        try:
-            if parameters is None:
-                query_result = self._psqlpy_connection.fetch(query)
-            else:
-                if isinstance(parameters, (list, tuple)):
-                    param_dict = {
-                        f"param_{i}": val for i, val in enumerate(parameters)
-                    }
-                    query = self._convert_positional_to_named(
-                        query, len(parameters)
-                    )
-                    query_result = self._psqlpy_connection.fetch(
-                        query, param_dict
-                    )
-                else:
-                    query_result = self._psqlpy_connection.fetch(
-                        query, parameters
-                    )
-
-            # Process the result - call .result() on the QueryResult object
-            if query_result:
-                self._rows = query_result.result()
-                self.rowcount = len(self._rows) if self._rows else 0
-                self._row_index = 0
-
-                # Set description (column metadata)
-                if self._rows and len(self._rows) > 0:
-                    first_row = self._rows[0]
-                    if isinstance(first_row, dict):
-                        self.description = [
-                            (name, None, None, None, None, None, None)
-                            for name in first_row.keys()
-                        ]
-                    elif isinstance(first_row, (list, tuple)):
-                        self.description = [
-                            (f"column_{i}", None, None, None, None, None, None)
-                            for i in range(len(first_row))
-                        ]
-            else:
-                self._rows = []  # type: ignore
-                self.rowcount = 0
-                self.description = None
-
-        except Exception as e:
-            raise self._convert_exception(e)
-
-    def executemany(
-        self, query: str, parameters_list: List[Union[dict, list, tuple]]
-    ):
-        """Execute a query multiple times with different parameters"""
-        try:
-            total_rowcount = 0
-            for parameters in parameters_list:
-                self.execute(query, parameters)
-                if self.rowcount > 0:
-                    total_rowcount += self.rowcount
-
-            self.rowcount = total_rowcount
-            self._rows = []  # executemany typically doesn't return results
-            self.description = None
-
-        except Exception as e:
-            raise self._convert_exception(e)
-
-    def fetchone(self) -> Optional[Tuple]:
-        """Fetch the next row"""
-        if not self._rows or self._row_index >= len(self._rows):
-            return None
-
-        row = self._rows[self._row_index]
-        self._row_index += 1
-
-        # Convert to tuple if it's a dict
-        if isinstance(row, dict):
-            return tuple(row.values())
-        elif isinstance(row, (list, tuple)):
-            return tuple(row)
-        else:
-            return (row,)
-
-    def fetchmany(self, size: Optional[int] = None) -> List[Tuple]:
-        """Fetch multiple rows"""
-        if size is None:
-            size = self.arraysize
-
-        results = []
-        for _ in range(size):
-            row = self.fetchone()
-            if row is None:
-                break
-            results.append(row)
-
-        return results
-
-    def fetchall(self) -> List[Tuple]:
-        """Fetch all remaining rows"""
-        results = []
-        while True:
-            row = self.fetchone()
-            if row is None:
-                break
-            results.append(row)
-
-        return results
-
-    def close(self):
-        """Close the cursor"""
-        self._result = None
-        self._rows = None
-        self._row_index = 0
-        self.rowcount = -1
-        self.description = None
-
-    def _convert_positional_to_named(
-        self, query: str, param_count: int
-    ) -> str:
-        "Convert positional parameters (?) to named parameters (%(param_N)s)"
-        result = query
-        for i in range(param_count):
-            result = result.replace("?", f"%(param_{i})s", 1)
-        return result
-
-    def _convert_exception(self, e):
-        """Convert psqlpy exceptions to DBAPI exceptions"""
-        # In a full implementation, you'd map specific error types
-        return e
+class PGExecutionContext_psqlpy(PGExecutionContext):
+    def create_server_side_cursor(self) -> "DBAPICursor":
+        return self._dbapi_connection.cursor(server_side=True)
 
 
-class PsqlpyConnection:
-    """DBAPI-compatible connection wrapper for psqlpy"""
+class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
+    __slots__ = (
+        "_arraysize",
+        "_description",
+        "_invalidate_schema_cache_asof",
+        "_rowcount",
+    )
 
-    def __init__(self, psqlpy_connection):
-        self._psqlpy_connection = psqlpy_connection
-        self._closed = False
-        self._autocommit = True  # PostgreSQL default
-        self._in_transaction = False
+    _adapt_connection: "AsyncAdapt_psqlpy_connection"
+    _connection: psqlpy.Connection
 
-    def cursor(self):
-        """Create a new cursor"""
-        if self._closed:
-            raise psqlpy.Error("Connection is closed")
-        return PsqlpyCursor(self)
+    def __init__(self, adapt_connection: AsyncAdapt_dbapi_connection):
+        self._adapt_connection = adapt_connection
+        self._connection = adapt_connection._connection
+        self._rows = deque()
+        self._description: t.Optional[t.List[t.Tuple[t.Any, ...]]] = None
+        self._arraysize = 1
+        self._rowcount = -1
+        self._invalidate_schema_cache_asof = 0
 
-    def commit(self):
-        """Commit the current transaction"""
-        if self._closed:
-            raise psqlpy.Error("Connection is closed")
+    async def _prepare_execute(
+        self,
+        querystring: str,
+        parameters: t.Union[
+            t.Sequence[t.Any], t.Mapping[str, Any], None
+        ] = None,
+    ) -> None:
+        if self._adapt_connection._transaction:
+            await self._adapt_connection._start_transaction()
 
-        # psqlpy handles transactions differently
-        # If we're in a transaction, we need to commit it
-        if self._in_transaction:
-            try:
-                # This is a simplified approach - in practice you'd track
-                # transactions better
-                cursor = self.cursor()
-                cursor.execute("COMMIT")
-                self._in_transaction = False
-            except Exception as e:
-                raise self._convert_exception(e)
+        prepared_stmt = await self._connection.prepare(
+            querystring=querystring,
+            parameters=parameters,
+        )
+        self._description = [
+            (column.name, column.table_oid, None, None, None, None, None)
+            for column in prepared_stmt.columns()
+        ]
 
-    def rollback(self):
-        """Rollback the current transaction"""
-        if self._closed:
-            raise psqlpy.Error("Connection is closed")
+        if self.server_side:
+            self._cursor = self._connection.cursor(
+                querystring,
+                parameters,
+            )
+            await self._cursor.start()
+            self._rowcount = -1
+            return
 
-        if self._in_transaction:
-            try:
-                cursor = self.cursor()
-                cursor.execute("ROLLBACK")
-                self._in_transaction = False
-            except Exception as e:
-                raise self._convert_exception(e)
-
-    def close(self):
-        """Close the connection"""
-        if not self._closed:
-            try:
-                self._psqlpy_connection.close()
-            except Exception:
-                pass  # Ignore errors on close
-            self._closed = True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            self.rollback()
-        else:
-            self.commit()
-        self.close()
+        results = await prepared_stmt.execute()
+        rows: Tuple[Tuple[Any, ...], ...] = tuple(
+            tuple(value for _, value in row)
+            for row in results.row_factory(row_factories.tuple_row)
+        )
+        self._rows = deque(rows)
 
     @property
-    def autocommit(self):
-        """Get autocommit mode"""
-        return self._autocommit
+    def description(self) -> "Optional[_DBAPICursorDescription]":
+        return self._description
 
-    @autocommit.setter
-    def autocommit(self, value):
-        """Set autocommit mode"""
-        self._autocommit = value
-        # In a full implementation, you'd configure the underlying connection
+    @property
+    def rowcount(self) -> int:
+        return self._rowcount
 
-    def _convert_exception(self, e):
-        """Convert psqlpy exceptions to DBAPI exceptions"""
-        return e
+    @property
+    def arraysize(self) -> int:
+        return self._arraysize
+
+    @arraysize.setter
+    def arraysize(self, value: int) -> None:
+        self._arraysize = value
+
+    async def _executemany(
+        self,
+        operation: str,
+        seq_of_parameters: t.Sequence[t.Sequence[t.Any]],
+    ) -> None:
+        adapt_connection = self._adapt_connection
+
+        self._description = None
+
+        if not adapt_connection._started:
+            await adapt_connection._start_transaction()
+
+        return await self._connection.execute_many(
+            operation,
+            seq_of_parameters,
+            True,
+        )
+
+    def execute(
+        self,
+        operation: t.Any,
+        parameters: t.Union[
+            t.Sequence[t.Any], t.Mapping[str, Any], None
+        ] = None,
+    ) -> None:
+        await_only(self._prepare_execute(operation, parameters))
+
+    def executemany(self, operation, seq_of_parameters) -> None:
+        return await_only(self._executemany(operation, seq_of_parameters))
+
+    def setinputsizes(self, *inputsizes):
+        raise NotImplementedError
+
+
+class AsyncAdapt_psqlpy_ss_cursor(
+    AsyncAdapt_dbapi_ss_cursor,
+    AsyncAdapt_psqlpy_cursor,
+):
+    _cursor: psqlpy.Cursor
+
+    def __init__(self, adapt_connection):
+        self._adapt_connection = adapt_connection
+        self._connection = adapt_connection._connection
+        self.await_ = adapt_connection.await_
+
+        self._cursor = self._connection.cursor()
+
+    def _convert_result(
+        self,
+        result: psqlpy.QueryResult,
+    ) -> Tuple[Tuple[Any, ...], ...]:
+        return tuple(
+            tuple(value for _, value in row)
+            for row in result.row_factory(row_factories.tuple_row)
+        )
+
+    def close(self):
+        if self._cursor is not None:
+            self._cursor.close()
+            self._cursor = None
+
+    def fetchone(self):
+        result = self.await_(self._cursor.fetchone())
+        return self._convert_result(result=result)
+
+    def fetchmany(self, size=None):
+        result = self.await_(self._cursor.fetchmany(size=size))
+        return self._convert_result(result=result)
+
+    def fetchall(self):
+        result = self.await_(self._cursor.fetchall())
+        return self._convert_result(result=result)
+
+    def __iter__(self):
+        iterator = self._cursor.__aiter__()
+        while True:
+            try:
+                result = self.await_(iterator.__anext__())
+                rows = self._convert_result(result=result)
+                yield rows
+            except StopAsyncIteration:
+                break
+
+
+class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
+    _cursor_cls = AsyncAdapt_psqlpy_cursor
+    _ss_cursor_cls = AsyncAdapt_psqlpy_ss_cursor
+
+    _connection: psqlpy.Connection
+
+    __slots__ = (
+        "_invalidate_schema_cache_asof",
+        "_isolation_setting",
+        "_prepared_statement_cache",
+        "_prepared_statement_name_func",
+        "_started",
+        "_transaction",
+        "deferrable",
+        "isolation_level",
+        "readonly",
+    )
+
+    def __init__(self, dbapi, connection):
+        super().__init__(dbapi, connection)
+        self.isolation_level = self._isolation_setting = None
+        self.readonly = False
+        self.deferrable = False
+        self._transaction = None
+        self._started = False
+
+    async def _start_transaction(self) -> None:
+        transaction = self._connection.transaction()
+        await transaction.begin()
+        self._transaction = transaction
+
+    def set_isolation_level(self, level):
+        self.isolation_level = self._isolation_setting = level
+
+    def rollback(self) -> None:
+        await_only(self._connection.rollback())
+        self._transaction = None
+
+    def commit(self) -> None:
+        await_only(self._connection.commit())
+        self._transaction = None
+
+    def close(self):
+        self.rollback()
+        self._connection.close()
+
+    def cursor(self, server_side=False):
+        if server_side:
+            return self._ss_cursor_cls(self)
+        return self._cursor_cls(self)
+
+
+# Backward compatibility aliases
+PsqlpyConnection = AsyncAdapt_psqlpy_connection
+PsqlpyCursor = AsyncAdapt_psqlpy_cursor

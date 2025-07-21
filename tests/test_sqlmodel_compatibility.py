@@ -24,9 +24,7 @@ class TestSQLModelCompatibility(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures before each test method."""
-        # Create an in-memory SQLite database for testing
-        # We use SQLite for testing as it doesn't require a running PostgreSQL server
-        # The focus is on dialect compatibility with SQLModel, not PostgreSQL features
+
         self.engine = create_engine("sqlite:///:memory:")
 
         # Create all tables

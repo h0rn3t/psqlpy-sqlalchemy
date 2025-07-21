@@ -1,27 +1,65 @@
-import psqlpy
+from sqlalchemy.util.concurrency import await_only
+
+from .connection import AsyncAdapt_psqlpy_connection
+
+
+class PSQLPyAdaptDBAPI:
+    def __init__(self, psqlpy) -> None:
+        self.psqlpy = psqlpy
+        self.paramstyle = "numeric_dollar"
+
+        # DBAPI 2.0 module attributes
+        self.apilevel = "2.0"
+        self.threadsafety = 2  # Threads may share the module and connections
+
+        self.Warning = psqlpy.Error
+        self.Error = psqlpy.Error
+        self.InterfaceError = psqlpy.Error
+        self.DatabaseError = psqlpy.Error
+        self.DataError = psqlpy.Error
+        self.OperationalError = psqlpy.Error
+        self.IntegrityError = psqlpy.Error
+        self.InternalError = psqlpy.Error
+        self.ProgrammingError = psqlpy.Error
+        self.NotSupportedError = psqlpy.Error
+
+        for k, v in self.psqlpy.__dict__.items():
+            if k != "connect":
+                self.__dict__[k] = v
+
+    def connect(self, *arg, **kw):
+        creator_fn = kw.pop("async_creator_fn", self.psqlpy.connect)
+        return AsyncAdapt_psqlpy_connection(
+            self, await_only(creator_fn(*arg, **kw))
+        )
 
 
 class PsqlpyDBAPI:
     """DBAPI-compatible module interface for psqlpy"""
 
-    # DBAPI 2.0 module attributes
     apilevel = "2.0"
     threadsafety = 2  # Threads may share the module and connections
     paramstyle = (
         "numeric_dollar"  # PostgreSQL uses $1, $2, etc. style parameters
     )
 
-    # Exception hierarchy (DBAPI 2.0 standard)
-    Warning = psqlpy.Error
-    Error = psqlpy.Error
-    InterfaceError = psqlpy.Error
-    DatabaseError = psqlpy.Error
-    DataError = psqlpy.Error
-    OperationalError = psqlpy.Error
-    IntegrityError = psqlpy.Error
-    InternalError = psqlpy.Error
-    ProgrammingError = psqlpy.Error
-    NotSupportedError = psqlpy.Error
+    def __init__(self):
+        # Initialize with psqlpy module
+        import psqlpy
+
+        self._adapt_dbapi = PSQLPyAdaptDBAPI(psqlpy)
+
+        # Copy attributes from psqlpy for compatibility
+        self.Warning = psqlpy.Error
+        self.Error = psqlpy.Error
+        self.InterfaceError = psqlpy.Error
+        self.DatabaseError = psqlpy.Error
+        self.DataError = psqlpy.Error
+        self.OperationalError = psqlpy.Error
+        self.IntegrityError = psqlpy.Error
+        self.InternalError = psqlpy.Error
+        self.ProgrammingError = psqlpy.Error
+        self.NotSupportedError = psqlpy.Error
 
     # Type constructors
     def Date(self, year, month, day):
@@ -75,5 +113,5 @@ class PsqlpyDBAPI:
     ROWID = int
 
     def connect(self, *args, **kwargs):
-        """Create a connection - delegates to psqlpy.connect"""
-        return psqlpy.connect(*args, **kwargs)
+        """Create a connection - delegates to the adapted DBAPI"""
+        return self._adapt_dbapi.connect(*args, **kwargs)

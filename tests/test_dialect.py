@@ -14,6 +14,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
+from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateTable
 
 
@@ -33,7 +34,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test that the dialect is properly registered"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://user:password@localhost/test"
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
             )
             self.assertIsNotNone(self.engine.dialect)
             self.assertEqual(self.engine.dialect.name, "postgresql")
@@ -45,7 +47,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test connection string parsing"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://testuser:testpass@localhost:5432/testdb?sslmode=require"  # noqa
+                "postgresql+psqlpy://testuser:testpass@localhost:5432/testdb?sslmode=require",  # noqa
+                poolclass=NullPool,
             )
 
             # Test create_connect_args
@@ -77,7 +80,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test basic SQL compilation"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://user:password@localhost/test"
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
             )
 
             # Test basic SQL compilation
@@ -109,7 +113,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test DBAPI interface"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://user:password@localhost/test"
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
             )
             dbapi = self.engine.dialect.import_dbapi()
 
@@ -147,7 +152,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test connection creation (without actual database)"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://user:password@localhost/test"
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
             )
 
             try:
@@ -170,7 +176,8 @@ class TestPsqlpyDialect(unittest.TestCase):
         """Test dialect capabilities and features"""
         try:
             self.engine = create_engine(
-                "postgresql+psqlpy://user:password@localhost/test"
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
             )
             dialect = self.engine.dialect
 
