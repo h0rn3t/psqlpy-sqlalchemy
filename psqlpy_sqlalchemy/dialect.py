@@ -1,10 +1,11 @@
 import typing as t
+import uuid
 from types import ModuleType
 from typing import Any, Dict, MutableMapping, Sequence, Tuple
 
 import psqlpy
 from sqlalchemy import URL, util
-from sqlalchemy.dialects.postgresql.base import INTERVAL, PGDialect
+from sqlalchemy.dialects.postgresql.base import INTERVAL, UUID, PGDialect
 from sqlalchemy.dialects.postgresql.json import JSONPathType
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 from sqlalchemy.sql import operators, sqltypes
@@ -218,6 +219,29 @@ class _PGNullType(sqltypes.NullType):
     render_bind_cast = True
 
 
+class _PGUUID(UUID):
+    """PostgreSQL UUID type with proper parameter binding for psqlpy."""
+
+    def bind_processor(self, dialect):
+        """Process UUID parameters for psqlpy compatibility."""
+
+        def process(value):
+            if value is None:
+                return None
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            if isinstance(value, str):
+                # Validate that it's a proper UUID string
+                try:
+                    uuid.UUID(value)
+                    return value
+                except ValueError:
+                    raise ValueError(f"Invalid UUID string: {value}")
+            return str(value)
+
+        return process
+
+
 class PSQLPyAsyncDialect(PGDialect):
     driver = "psqlpy"
     is_async = True
@@ -264,6 +288,7 @@ class PSQLPyAsyncDialect(PGDialect):
             sqltypes.SmallInteger: _PGSmallInteger,
             sqltypes.BigInteger: _PGBigInteger,
             sqltypes.Boolean: _PGBoolean,
+            UUID: _PGUUID,  # UUID support with proper parameter binding
             # Note: NullType mapping removed - standard PostgreSQL dialect doesn't map it
             # and mapping it with render_bind_cast=True causes DDL compilation errors
         },

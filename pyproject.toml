@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psqlpy-sqlalchemy"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "SQLAlchemy dialect for psqlpy PostgreSQL driver"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,6 +36,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "greenlet>=1.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "sqlmodel>=0.0.8",
@@ -112,3 +113,6 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
