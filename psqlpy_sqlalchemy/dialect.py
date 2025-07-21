@@ -1,14 +1,73 @@
+import asyncio
 from typing import Any, Dict, List, Tuple
 
 import psqlpy
-from sqlalchemy.engine import default
+from sqlalchemy import util
+from sqlalchemy.dialects.postgresql.base import INTERVAL, PGDialect
+from sqlalchemy.dialects.postgresql.json import JSONPathType
 from sqlalchemy.engine.url import URL
+from sqlalchemy.sql import sqltypes
 
 from .connection import PsqlpyConnection
 from .dbapi import PsqlpyDBAPI
 
 
-class PsqlpyDialect(default.DefaultDialect):
+# Custom type classes with render_bind_cast for better PostgreSQL compatibility
+class _PGString(sqltypes.String):
+    render_bind_cast = True
+
+
+class _PGJSONIntIndexType(sqltypes.JSON.JSONIntIndexType):
+    __visit_name__ = "json_int_index"
+    render_bind_cast = True
+
+
+class _PGJSONStrIndexType(sqltypes.JSON.JSONStrIndexType):
+    __visit_name__ = "json_str_index"
+    render_bind_cast = True
+
+
+class _PGJSONPathType(JSONPathType):
+    pass
+
+
+class _PGInterval(INTERVAL):
+    render_bind_cast = True
+
+
+class _PGTimeStamp(sqltypes.DateTime):
+    render_bind_cast = True
+
+
+class _PGDate(sqltypes.Date):
+    render_bind_cast = True
+
+
+class _PGTime(sqltypes.Time):
+    render_bind_cast = True
+
+
+class _PGInteger(sqltypes.Integer):
+    render_bind_cast = True
+
+
+class _PGSmallInteger(sqltypes.SmallInteger):
+    render_bind_cast = True
+
+
+class _PGBigInteger(sqltypes.BigInteger):
+    render_bind_cast = True
+
+
+class _PGBoolean(sqltypes.Boolean):
+    render_bind_cast = True
+
+
+class _PGNullType(sqltypes.NullType):
+    render_bind_cast = True
+
+
+class PsqlpyDialect(PGDialect):
     """SQLAlchemy dialect for psqlpy PostgreSQL driver"""
 
     name = "postgresql"
@@ -16,6 +75,7 @@ class PsqlpyDialect(default.DefaultDialect):
 
     # Dialect capabilities
     supports_statement_cache = True
+    supports_server_side_cursors = True
     supports_multivalues_insert = True
     supports_unicode_statements = True
     supports_unicode_binds = True
@@ -31,6 +91,7 @@ class PsqlpyDialect(default.DefaultDialect):
     update_returning = True
     delete_returning = True
     favor_returning_over_lastrowid = True
+    default_paramstyle = "numeric_dollar"
 
     # Connection pooling
     supports_sane_rowcount = True
@@ -40,10 +101,40 @@ class PsqlpyDialect(default.DefaultDialect):
     supports_isolation_level = True
     default_isolation_level = "READ_COMMITTED"
 
+    # Comprehensive colspecs mapping for better PostgreSQL type handling
+    colspecs = util.update_copy(
+        PGDialect.colspecs,
+        {
+            sqltypes.String: _PGString,
+            sqltypes.JSON.JSONPathType: _PGJSONPathType,
+            sqltypes.JSON.JSONIntIndexType: _PGJSONIntIndexType,
+            sqltypes.JSON.JSONStrIndexType: _PGJSONStrIndexType,
+            sqltypes.Interval: _PGInterval,
+            INTERVAL: _PGInterval,
+            sqltypes.Date: _PGDate,
+            sqltypes.DateTime: _PGTimeStamp,
+            sqltypes.Time: _PGTime,
+            sqltypes.Integer: _PGInteger,
+            sqltypes.SmallInteger: _PGSmallInteger,
+            sqltypes.BigInteger: _PGBigInteger,
+            sqltypes.Boolean: _PGBoolean,
+            sqltypes.NullType: _PGNullType,
+        },
+    )
+
     @classmethod
     def import_dbapi(cls):
         """Import the psqlpy module as DBAPI"""
         return PsqlpyDBAPI()
+
+    @util.memoized_property
+    def _isolation_lookup(self) -> Dict[str, Any]:
+        """Mapping of SQLAlchemy isolation levels to psqlpy isolation levels"""
+        return {
+            "READ_COMMITTED": psqlpy.IsolationLevel.ReadCommitted,
+            "REPEATABLE_READ": psqlpy.IsolationLevel.RepeatableRead,
+            "SERIALIZABLE": psqlpy.IsolationLevel.Serializable,
+        }
 
     def create_connect_args(
         self, url: URL
@@ -89,8 +180,10 @@ class PsqlpyDialect(default.DefaultDialect):
     def connect(self, *cargs, **cparams):
         """Create a connection to the database"""
         try:
-            # Use psqlpy.connect to create a connection
-            raw_connection = psqlpy.connect(**cparams)
+            # psqlpy.connect returns a coroutine that needs to be awaited
+            # Since SQLAlchemy dialects are synchronous, we use asyncio.run()
+            connection_coro = psqlpy.connect(**cparams)
+            raw_connection = asyncio.run(connection_coro)
             # Wrap it in our DBAPI-compatible connection
             return PsqlpyConnection(raw_connection)
         except Exception as e:
@@ -150,7 +243,15 @@ class PsqlpyDialect(default.DefaultDialect):
         return self.default_isolation_level
 
     def set_isolation_level(self, dbapi_connection, level):
-        """Set the isolation level"""
+        """Set the isolation level using psqlpy enums"""
+        if hasattr(dbapi_connection, "set_isolation_level"):
+            # Use psqlpy's native isolation level setting if available
+            psqlpy_level = self._isolation_lookup.get(level)
+            if psqlpy_level is not None:
+                dbapi_connection.set_isolation_level(psqlpy_level)
+                return
+
+        # Fallback to SQL-based approach
         try:
             cursor = dbapi_connection.cursor()
             level_map = {
@@ -176,3 +277,71 @@ class PsqlpyDialect(default.DefaultDialect):
     def get_default_isolation_level(self, dbapi_conn):
         """Get the default isolation level for new connections"""
         return self.default_isolation_level
+
+    def set_readonly(self, connection, value):
+        """Set the readonly state of the connection"""
+        if hasattr(connection, "readonly"):
+            if value is True:
+                connection.readonly = psqlpy.ReadVariant.ReadOnly
+            else:
+                connection.readonly = psqlpy.ReadVariant.ReadWrite
+        else:
+            # Fallback to SQL-based approach
+            try:
+                cursor = connection.cursor()
+                if value:
+                    cursor.execute("SET TRANSACTION READ ONLY")
+                else:
+                    cursor.execute("SET TRANSACTION READ WRITE")
+            except Exception as e:
+                raise self._handle_exception(e)
+
+    def get_readonly(self, connection):
+        """Get the readonly state of the connection"""
+        if hasattr(connection, "readonly"):
+            return connection.readonly == psqlpy.ReadVariant.ReadOnly
+        return False
+
+    def set_deferrable(self, connection, value):
+        """Set the deferrable state of the connection"""
+        if hasattr(connection, "deferrable"):
+            connection.deferrable = value
+        else:
+            # Fallback to SQL-based approach
+            try:
+                cursor = connection.cursor()
+                if value:
+                    cursor.execute("SET TRANSACTION DEFERRABLE")
+                else:
+                    cursor.execute("SET TRANSACTION NOT DEFERRABLE")
+            except Exception as e:
+                raise self._handle_exception(e)
+
+    def get_deferrable(self, connection):
+        """Get the deferrable state of the connection"""
+        if hasattr(connection, "deferrable"):
+            return connection.deferrable
+        return False
+
+    def has_table(self, connection, table_name, schema=None):
+        """Check if a table exists in the database"""
+        if schema is None:
+            schema = "public"
+
+        query = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = %s
+                AND table_name = %s
+            )
+        """
+
+        try:
+            cursor = connection.cursor()
+            cursor.execute(query, (schema, table_name))
+            result = cursor.fetchone()
+            return result[0] if result else False
+        except Exception:
+            # If we can't check, assume table doesn't exist
+            return False

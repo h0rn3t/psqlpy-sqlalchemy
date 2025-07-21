@@ -7,7 +7,9 @@ class PsqlpyDBAPI:
     # DBAPI 2.0 module attributes
     apilevel = "2.0"
     threadsafety = 2  # Threads may share the module and connections
-    paramstyle = "pyformat"  # PostgreSQL uses %(name)s style parameters
+    paramstyle = (
+        "numeric_dollar"  # PostgreSQL uses $1, $2, etc. style parameters
+    )
 
     # Exception hierarchy (DBAPI 2.0 standard)
     Warning = psqlpy.Error

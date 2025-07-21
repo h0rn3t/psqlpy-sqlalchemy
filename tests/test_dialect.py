@@ -118,7 +118,7 @@ class TestPsqlpyDialect(unittest.TestCase):
             # Test DBAPI attributes
             self.assertEqual(dbapi.apilevel, "2.0")
             self.assertEqual(dbapi.threadsafety, 2)
-            self.assertEqual(dbapi.paramstyle, "pyformat")
+            self.assertEqual(dbapi.paramstyle, "numeric_dollar")
 
             # Test exception hierarchy
             exceptions = [

@@ -20,7 +20,7 @@ class TestPsqlpyDBAPI(unittest.TestCase):
         """Test DBAPI 2.0 module attributes"""
         self.assertEqual(self.dbapi.apilevel, "2.0")
         self.assertEqual(self.dbapi.threadsafety, 2)
-        self.assertEqual(self.dbapi.paramstyle, "pyformat")
+        self.assertEqual(self.dbapi.paramstyle, "numeric_dollar")
 
     def test_exception_hierarchy(self):
         """Test that all required DBAPI exceptions are available"""

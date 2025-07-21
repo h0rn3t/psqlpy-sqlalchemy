@@ -22,7 +22,7 @@ class PsqlpyCursor:
         """Execute a query with optional parameters"""
         try:
             if parameters is None:
-                self._result = self._psqlpy_connection.fetch(query)
+                query_result = self._psqlpy_connection.fetch(query)
             else:
                 if isinstance(parameters, (list, tuple)):
                     param_dict = {
@@ -31,17 +31,17 @@ class PsqlpyCursor:
                     query = self._convert_positional_to_named(
                         query, len(parameters)
                     )
-                    self._result = self._psqlpy_connection.fetch(
+                    query_result = self._psqlpy_connection.fetch(
                         query, param_dict
                     )
                 else:
-                    self._result = self._psqlpy_connection.fetch(
+                    query_result = self._psqlpy_connection.fetch(
                         query, parameters
                     )
 
-            # Process the result
-            if self._result:
-                self._rows = self._result.result()
+            # Process the result - call .result() on the QueryResult object
+            if query_result:
+                self._rows = query_result.result()
                 self.rowcount = len(self._rows) if self._rows else 0
                 self._row_index = 0
 
