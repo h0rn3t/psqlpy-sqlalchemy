@@ -8,9 +8,9 @@ on:
     - main
 
 jobs:
-  test:
-    name: test
-    runs-on: ${{ matrix.os }}
+  test-linux:
+    name: test-linux
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:15
@@ -27,34 +27,51 @@ jobs:
           - 5432:5432
     strategy:
       matrix:
-        build: [linux_3.8, linux_3.9, linux_3.10, linux_3.11, linux_3.13, windows_3.9, windows_3.13, mac_3.9, mac_3.13]
+        python: ["3.8", "3.9", "3.10", "3.11", "3.13.3"]
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip wheel
+        pip install -e ".[dev]"
+
+    - name: Run tests with PostgreSQL
+      run: python -m pytest tests/ -v
+      env:
+        DATABASE_URL: postgresql+psqlpy://postgres:password@localhost:5432/test_db
+
+    - name: Produce coverage report
+      if: matrix.python == '3.9'
+      run: pytest --cov=psqlpy_sqlalchemy --cov-report=xml
+      env:
+        DATABASE_URL: postgresql+psqlpy://postgres:password@localhost:5432/test_db
+
+    - name: Upload coverage report
+      if: matrix.python == '3.9'
+      uses: codecov/codecov-action@v1
+      with:
+        file: ./coverage.xml
+
+  test-other:
+    name: test-other
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
         include:
-        - build: linux_3.8
-          os: ubuntu-latest
-          python: "3.8"
-        - build: linux_3.9
-          os: ubuntu-latest
+        - os: windows-latest
           python: "3.9"
-        - build: linux_3.10
-          os: ubuntu-latest
-          python: "3.10"
-        - build: linux_3.11
-          os: ubuntu-latest
-          python: "3.11"
-        - build: linux_3.13
-          os: ubuntu-latest
+        - os: windows-latest
           python: "3.13.3"
-        - build: windows_3.9
-          os: windows-latest
+        - os: macos-latest
           python: "3.9"
-        - build: windows_3.13
-          os: windows-latest
-          python: "3.13.3"
-        - build: mac_3.9
-          os: macos-latest
-          python: "3.9"
-        - build: mac_3.13
-          os: macos-latest
+        - os: macos-latest
           python: "3.13.3"
     steps:
     - name: Checkout repository
@@ -70,27 +87,8 @@ jobs:
         python -m pip install --upgrade pip wheel
         pip install -e ".[dev]"
 
-    - name: Run tests (with PostgreSQL on Linux)
-      if: startsWith(matrix.build, 'linux')
+    - name: Run tests without PostgreSQL
       run: python -m pytest tests/ -v
-      env:
-        DATABASE_URL: postgresql+psqlpy://postgres:password@localhost:5432/test_db
-
-    - name: Run tests (without PostgreSQL on Windows/Mac)
-      if: "!startsWith(matrix.build, 'linux')"
-      run: python -m pytest tests/ -v
-
-    - name: Produce coverage report
-      if: matrix.build == 'linux_3.9'
-      run: pytest --cov=psqlpy_sqlalchemy --cov-report=xml
-      env:
-        DATABASE_URL: postgresql+psqlpy://postgres:password@localhost:5432/test_db
-
-    - name: Upload coverage report
-      if: matrix.build == 'linux_3.9'
-      uses: codecov/codecov-action@v1
-      with:
-        file: ./coverage.xml
 
 #    - name: Run pytest
 #      run:  python -m pytest tests/ -v
