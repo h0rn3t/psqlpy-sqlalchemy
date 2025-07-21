@@ -10,6 +10,7 @@ This package provides a SQLAlchemy dialect that allows you to use psqlpy as the 
 
 - **High Performance**: Built on psqlpy's Rust-based PostgreSQL driver
 - **SQLAlchemy 2.0+ Compatible**: Full support for modern SQLAlchemy features
+- **SQLModel Compatible**: Works with SQLModel for Pydantic integration
 - **DBAPI 2.0 Compliant**: Standard Python database interface
 - **Connection Pooling**: Leverages psqlpy's built-in connection pooling
 - **Transaction Support**: Full transaction and savepoint support
@@ -95,6 +96,40 @@ with engine.connect() as conn:
     result = conn.execute(users.select())
     for row in result:
         print(row)
+```
+
+### SQLModel Usage
+
+```python
+from typing import Optional
+from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+# Define a SQLModel model
+class Hero(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    secret_name: str
+    age: Optional[int] = None
+
+# Create engine with psqlpy dialect
+engine = create_engine("postgresql+psqlpy://user:password@localhost/testdb")
+
+# Create tables
+SQLModel.metadata.create_all(engine)
+
+# Insert data
+with Session(engine) as session:
+    hero = Hero(name="Deadpond", secret_name="Dive Wilson", age=30)
+    session.add(hero)
+    session.commit()
+    session.refresh(hero)
+    print(f"Created hero: {hero.name} with id {hero.id}")
+
+# Query data
+with Session(engine) as session:
+    statement = select(Hero).where(Hero.name == "Deadpond")
+    hero = session.exec(statement).first()
+    print(f"Found hero: {hero.name}, secret identity: {hero.secret_name}")
 ```
 
 ### Async Usage
@@ -207,6 +242,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - [psqlpy](https://github.com/qaspen-python/psqlpy) - The underlying PostgreSQL driver
 - [SQLAlchemy](https://www.sqlalchemy.org/) - The Python SQL toolkit and ORM
+- [SQLModel](https://sqlmodel.tiangolo.com/) - SQLAlchemy-based ORM with Pydantic validation
 
 ## Changelog
 
@@ -215,6 +251,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Initial release
 - Basic SQLAlchemy dialect implementation
 - DBAPI 2.0 compatible interface
+- SQLModel compatibility
 - Connection string parsing
 - Basic SQL compilation support
 - Transaction support
