@@ -59,10 +59,6 @@ jobs:
     - name: Run unittest
       run: python -m unittest discover -s tests -p "test_*.py" -v
 
-    - name: Run mypy type checking
-      if: matrix.build == 'linux_3.9'
-      run: mypy psqlpy_sqlalchemy
-
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -80,28 +76,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
 
-    - name: Run flake8
-      run: flake8 --count psqlpy_sqlalchemy tests
+    - name: Run ruff linting
+      run: ruff check psqlpy_sqlalchemy tests
 
-  format:
-    name: format
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - name: Run ruff formatting check
+      run: ruff format --check psqlpy_sqlalchemy tests
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.9"
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-
-    - name: Check formatting of imports
-      run: isort --check-only --diff --verbose psqlpy_sqlalchemy tests
-
-    - name: Check formatting of code
-      run: black psqlpy_sqlalchemy tests --check --diff
+    - name: Run mypy type checking
+      run: mypy psqlpy_sqlalchemy
