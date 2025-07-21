@@ -1,8 +1,3 @@
-"""
-DBAPI-compatible interface for psqlpy
-"""
-
-
 import psqlpy
 
 
