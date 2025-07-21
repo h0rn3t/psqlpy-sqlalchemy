@@ -39,6 +39,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "sqlmodel>=0.0.8",
+    "pytest-cov",
 ]
 
 [project.urls]
