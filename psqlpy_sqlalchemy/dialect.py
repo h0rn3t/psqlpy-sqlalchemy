@@ -6,6 +6,7 @@ import psqlpy
 from sqlalchemy import URL, util
 from sqlalchemy.dialects.postgresql.base import INTERVAL, PGDialect
 from sqlalchemy.dialects.postgresql.json import JSONPathType
+from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import operators, sqltypes
 from sqlalchemy.sql.functions import GenericFunction
 
@@ -201,6 +202,7 @@ class _PGNullType(sqltypes.NullType):
 class PSQLPyAsyncDialect(PGDialect):
     driver = "psqlpy"
     is_async = True
+    poolclass = NullPool
 
     execution_ctx_cls = PGExecutionContext_psqlpy
     supports_statement_cache = True
