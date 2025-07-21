@@ -1,7 +1,6 @@
 import typing as t
-from collections.abc import MutableMapping, Sequence
 from types import ModuleType
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, MutableMapping, Sequence, Tuple
 
 import psqlpy
 from sqlalchemy import URL, util

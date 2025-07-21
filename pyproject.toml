@@ -44,9 +44,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-username/psqlpy-sqlalchemy"
-Repository = "https://github.com/your-username/psqlpy-sqlalchemy"
-Issues = "https://github.com/your-username/psqlpy-sqlalchemy/issues"
+Homepage = "https://github.com/h0rn3t/psqlpy-sqlalchemy"
+Repository = "https://github.com/h0rn3t/psqlpy-sqlalchemy"
+Issues = "https://github.com/h0rn3t/psqlpy-sqlalchemy/issues"
 
 [project.entry-points."sqlalchemy.dialects"]
 "postgresql.psqlpy" = "psqlpy_sqlalchemy.dialect:PsqlpyDialect"
