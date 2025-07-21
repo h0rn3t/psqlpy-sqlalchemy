@@ -1,7 +1,3 @@
-"""
-SQLAlchemy dialect for psqlpy
-"""
-
 from typing import Any, Dict, List, Tuple
 
 import psqlpy

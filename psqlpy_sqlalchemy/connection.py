@@ -1,7 +1,3 @@
-"""
-DBAPI-compatible connection and cursor wrappers for psqlpy
-"""
-
 from typing import List, Optional, Tuple, Union
 
 import psqlpy

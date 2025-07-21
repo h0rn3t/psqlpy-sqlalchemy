@@ -1,7 +1,3 @@
-"""
-psqlpy-sqlalchemy: SQLAlchemy dialect for psqlpy
-"""
-
 from .dialect import PsqlpyDialect
 
 __version__ = "0.1.0"
