@@ -17,16 +17,19 @@ from .dbapi import PSQLPyAdaptDBAPI
 class CompatibleNullPool(NullPool):
     """
     A NullPool wrapper that accepts but ignores pool sizing arguments.
-    
+
     This class is used to maintain compatibility with middleware that passes
     pool_size and max_overflow arguments, which are not valid for NullPool
     but are commonly passed by frameworks like FastAPI with fastapi_async_sqlalchemy.
     """
-    
+
     def __init__(self, creator, pool_size=None, max_overflow=None, **kw):
         # Filter out pool sizing arguments that NullPool doesn't accept
-        filtered_kw = {k: v for k, v in kw.items() 
-                      if k not in ('pool_size', 'max_overflow')}
+        filtered_kw = {
+            k: v
+            for k, v in kw.items()
+            if k not in ("pool_size", "max_overflow")
+        }
         super().__init__(creator, **filtered_kw)
 
 
@@ -278,7 +281,6 @@ class PSQLPyAsyncDialect(PGDialect):
             "SERIALIZABLE": psqlpy.IsolationLevel.Serializable,
         }
 
-
     def create_connect_args(
         self,
         url: URL,
@@ -324,4 +326,4 @@ dialect = PSQLPyAsyncDialect
 PsqlpyDialect = PSQLPyAsyncDialect
 
 # Export the compatible pool class for users who need it
-__all__ = ['PSQLPyAsyncDialect', 'PsqlpyDialect', 'CompatibleNullPool']
+__all__ = ["PSQLPyAsyncDialect", "PsqlpyDialect", "CompatibleNullPool"]

@@ -12,7 +12,11 @@ from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, QueuePool
 
-from psqlpy_sqlalchemy.dialect import PSQLPyAsyncDialect, PsqlpyDialect, CompatibleNullPool
+from psqlpy_sqlalchemy.dialect import (
+    CompatibleNullPool,
+    PSQLPyAsyncDialect,
+    PsqlpyDialect,
+)
 
 
 class TestPoolclassCompatibility(unittest.TestCase):
@@ -223,7 +227,9 @@ class TestPoolclassCompatibility(unittest.TestCase):
         except Exception as e:
             # Connection errors are acceptable, we're testing pool creation
             if "Invalid argument(s)" in str(e):
-                self.fail(f"CompatibleNullPool should accept pool arguments: {e}")
+                self.fail(
+                    f"CompatibleNullPool should accept pool arguments: {e}"
+                )
 
     def test_compatible_nullpool_with_pool_args_async(self):
         """Test that CompatibleNullPool works with pool arguments in async engines"""
@@ -238,13 +244,16 @@ class TestPoolclassCompatibility(unittest.TestCase):
                 )
                 self.assertIsNotNone(self.async_engine)
                 self.assertEqual(
-                    self.async_engine.sync_engine.pool.__class__, CompatibleNullPool
+                    self.async_engine.sync_engine.pool.__class__,
+                    CompatibleNullPool,
                 )
                 return True
             except Exception as e:
                 # Connection errors are acceptable, we're testing pool creation
                 if "Invalid argument(s)" in str(e):
-                    self.fail(f"CompatibleNullPool should accept pool arguments: {e}")
+                    self.fail(
+                        f"CompatibleNullPool should accept pool arguments: {e}"
+                    )
                 return True
 
         loop = asyncio.new_event_loop()
@@ -270,7 +279,9 @@ class TestPoolclassCompatibility(unittest.TestCase):
         except Exception as e:
             # Connection errors are acceptable
             if "Invalid argument(s)" in str(e):
-                self.fail(f"CompatibleNullPool should ignore pool arguments: {e}")
+                self.fail(
+                    f"CompatibleNullPool should ignore pool arguments: {e}"
+                )
 
     def test_regular_nullpool_still_fails_with_pool_args(self):
         """Test that regular NullPool still fails with pool arguments (regression test)"""
@@ -281,8 +292,11 @@ class TestPoolclassCompatibility(unittest.TestCase):
                 pool_size=5,
                 max_overflow=10,
             )
-        
-        self.assertIn("Invalid argument(s) 'pool_size','max_overflow'", str(context.exception))
+
+        self.assertIn(
+            "Invalid argument(s) 'pool_size','max_overflow'",
+            str(context.exception),
+        )
 
 
 class TestFastAPIMiddlewareCompatibility(unittest.TestCase):
