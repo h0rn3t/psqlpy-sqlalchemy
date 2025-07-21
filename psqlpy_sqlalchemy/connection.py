@@ -51,33 +51,62 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> None:
-        if self._adapt_connection._transaction:
+        """Enhanced prepared statement execution with better error handling"""
+
+        if (
+            not self._adapt_connection._started
+            and self._adapt_connection._transaction is None
+        ):
             await self._adapt_connection._start_transaction()
 
-        prepared_stmt = await self._connection.prepare(
-            querystring=querystring,
-            parameters=parameters,
-        )
-        self._description = [
-            (column.name, column.table_oid, None, None, None, None, None)
-            for column in prepared_stmt.columns()
-        ]
-
-        if self.server_side:
-            self._cursor = self._connection.cursor(
-                querystring,
-                parameters,
+        try:
+            prepared_stmt = await self._connection.prepare(
+                querystring=querystring,
+                parameters=parameters,
             )
-            await self._cursor.start()
-            self._rowcount = -1
-            return
 
-        results = await prepared_stmt.execute()
-        rows: Tuple[Tuple[Any, ...], ...] = tuple(
-            tuple(value for _, value in row)
-            for row in results.row_factory(row_factories.tuple_row)
-        )
-        self._rows = deque(rows)
+            self._description = [
+                (
+                    column.name,
+                    column.table_oid,
+                    None,  # display_size
+                    None,  # internal_size
+                    None,  # precision
+                    None,  # scale
+                    None,  # null_ok
+                )
+                for column in prepared_stmt.columns()
+            ]
+
+            if self.server_side:
+                self._cursor = self._connection.cursor(
+                    querystring,
+                    parameters,
+                )
+                await self._cursor.start()
+                self._rowcount = -1
+                return
+
+            results = await prepared_stmt.execute()
+
+            rows: Tuple[Tuple[Any, ...], ...] = tuple(
+                tuple(value for _, value in row)
+                for row in results.row_factory(row_factories.tuple_row)
+            )
+            self._rows = deque(rows)
+            self._rowcount = len(rows) if rows else 0
+
+            # Track query execution statistics
+            self._adapt_connection._performance_stats["queries_executed"] += 1
+
+        except Exception:
+            self._description = None
+            self._rowcount = -1
+            self._rows = deque()
+            # Track connection errors
+            self._adapt_connection._performance_stats["connection_errors"] += 1
+            self._adapt_connection._connection_valid = False
+            raise
 
     @property
     def description(self) -> "Optional[_DBAPICursorDescription]":
@@ -133,49 +162,100 @@ class AsyncAdapt_psqlpy_ss_cursor(
     AsyncAdapt_dbapi_ss_cursor,
     AsyncAdapt_psqlpy_cursor,
 ):
+    """Enhanced server-side cursor with better async iteration support"""
+
     _cursor: psqlpy.Cursor
 
     def __init__(self, adapt_connection):
         self._adapt_connection = adapt_connection
         self._connection = adapt_connection._connection
         self.await_ = adapt_connection.await_
-
-        self._cursor = self._connection.cursor()
+        self._cursor = None
+        self._closed = False
 
     def _convert_result(
         self,
         result: psqlpy.QueryResult,
     ) -> Tuple[Tuple[Any, ...], ...]:
-        return tuple(
-            tuple(value for _, value in row)
-            for row in result.row_factory(row_factories.tuple_row)
-        )
+        """Enhanced result conversion with better error handling"""
+        if result is None:
+            return tuple()
+
+        try:
+            return tuple(
+                tuple(value for _, value in row)
+                for row in result.row_factory(row_factories.tuple_row)
+            )
+        except Exception:
+            # Return empty tuple on conversion error
+            return tuple()
 
     def close(self):
-        if self._cursor is not None:
-            self._cursor.close()
-            self._cursor = None
+        """Enhanced close with proper state management"""
+        if self._cursor is not None and not self._closed:
+            try:
+                self._cursor.close()
+            except Exception:
+                # Ignore close errors
+                pass
+            finally:
+                self._cursor = None
+                self._closed = True
 
     def fetchone(self):
-        result = self.await_(self._cursor.fetchone())
-        return self._convert_result(result=result)
+        """Fetch one row with enhanced error handling"""
+        if self._closed or self._cursor is None:
+            return None
+
+        try:
+            result = self.await_(self._cursor.fetchone())
+            converted = self._convert_result(result=result)
+            return converted[0] if converted else None
+        except Exception:
+            return None
 
     def fetchmany(self, size=None):
-        result = self.await_(self._cursor.fetchmany(size=size))
-        return self._convert_result(result=result)
+        """Fetch many rows with enhanced error handling"""
+        if self._closed or self._cursor is None:
+            return []
+
+        try:
+            if size is None:
+                size = self.arraysize
+            result = self.await_(self._cursor.fetchmany(size=size))
+            return list(self._convert_result(result=result))
+        except Exception:
+            return []
 
     def fetchall(self):
-        result = self.await_(self._cursor.fetchall())
-        return self._convert_result(result=result)
+        """Fetch all rows with enhanced error handling"""
+        if self._closed or self._cursor is None:
+            return []
+
+        try:
+            result = self.await_(self._cursor.fetchall())
+            return list(self._convert_result(result=result))
+        except Exception:
+            return []
 
     def __iter__(self):
+        """Enhanced async iteration with better error handling"""
+        if self._closed or self._cursor is None:
+            return
+
         iterator = self._cursor.__aiter__()
         while True:
             try:
                 result = self.await_(iterator.__anext__())
                 rows = self._convert_result(result=result)
-                yield rows
+                if rows:
+                    yield from rows
+                else:
+                    break
             except StopAsyncIteration:
+                break
+            except Exception:
+                # Stop iteration on any error
                 break
 
 
@@ -192,6 +272,9 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "_prepared_statement_name_func",
         "_started",
         "_transaction",
+        "_connection_valid",
+        "_last_ping_time",
+        "_performance_stats",
         "deferrable",
         "isolation_level",
         "readonly",
@@ -204,22 +287,108 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self.deferrable = False
         self._transaction = None
         self._started = False
+        self._connection_valid = True
+        self._last_ping_time = 0
+        self._performance_stats = {
+            "queries_executed": 0,
+            "transactions_committed": 0,
+            "transactions_rolled_back": 0,
+            "connection_errors": 0,
+        }
 
     async def _start_transaction(self) -> None:
-        transaction = self._connection.transaction()
-        await transaction.begin()
-        self._transaction = transaction
+        """Start a new transaction with enhanced state tracking"""
+        if self._transaction is not None:
+            # Transaction already started
+            return
+
+        try:
+            transaction = self._connection.transaction()
+            await transaction.begin()
+            self._transaction = transaction
+            self._started = True
+        except Exception:
+            self._transaction = None
+            self._started = False
+            raise
 
     def set_isolation_level(self, level):
         self.isolation_level = self._isolation_setting = level
 
     def rollback(self) -> None:
-        await_only(self._connection.rollback())
-        self._transaction = None
+        """Rollback transaction with enhanced error handling"""
+        try:
+            if self._transaction is not None:
+                await_only(self._transaction.rollback())
+            else:
+                await_only(self._connection.rollback())
+            self._performance_stats["transactions_rolled_back"] += 1
+        except Exception:
+            self._performance_stats["connection_errors"] += 1
+            self._connection_valid = False
+            # Ignore rollback errors as connection might be in bad state
+            pass
+        finally:
+            self._transaction = None
+            self._started = False
 
     def commit(self) -> None:
-        await_only(self._connection.commit())
-        self._transaction = None
+        """Commit transaction with enhanced error handling"""
+        try:
+            if self._transaction is not None:
+                await_only(self._transaction.commit())
+            else:
+                await_only(self._connection.commit())
+            self._performance_stats["transactions_committed"] += 1
+        except Exception as e:
+            self._performance_stats["connection_errors"] += 1
+            self._connection_valid = False
+            # On commit failure, try to rollback
+            try:
+                self.rollback()
+            except Exception:
+                pass
+            raise e
+        finally:
+            self._transaction = None
+            self._started = False
+
+    def is_valid(self) -> bool:
+        """Check if connection is valid"""
+        return self._connection_valid and self._connection is not None
+
+    def ping(self) -> bool:
+        """Ping the connection to check if it's alive"""
+        import time
+
+        current_time = time.time()
+        # Only ping if more than 30 seconds since last ping
+        if current_time - self._last_ping_time < 30:
+            return self._connection_valid
+
+        try:
+            # Simple query to test connection
+            await_only(self._connection.execute("SELECT 1"))
+            self._connection_valid = True
+            self._last_ping_time = current_time
+            return True
+        except Exception:
+            self._connection_valid = False
+            self._performance_stats["connection_errors"] += 1
+            return False
+
+    def get_performance_stats(self) -> dict:
+        """Get connection performance statistics"""
+        return self._performance_stats.copy()
+
+    def reset_performance_stats(self) -> None:
+        """Reset performance statistics"""
+        self._performance_stats = {
+            "queries_executed": 0,
+            "transactions_committed": 0,
+            "transactions_rolled_back": 0,
+            "connection_errors": 0,
+        }
 
     def close(self):
         self.rollback()

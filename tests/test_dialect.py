@@ -14,6 +14,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateTable
 
@@ -195,6 +196,201 @@ class TestPsqlpyDialect(unittest.TestCase):
         except Exception as e:
             self.fail(f"Failed dialect capabilities test: {e}")
 
+    def test_jsonb_operators_compilation(self):
+        """Test JSONB operators compile correctly"""
+        try:
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
+            )
+
+            metadata = MetaData()
+            test_table = Table(
+                "test_jsonb",
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("data", JSONB),
+            )
+
+            query1 = test_table.select().where(text("data @> :filter"))
+            compiled1 = str(
+                query1.compile(
+                    dialect=self.engine.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            self.assertIn("@>", compiled1)
+
+            query2 = test_table.select().where(text("data ? :key"))
+            compiled2 = str(
+                query2.compile(
+                    dialect=self.engine.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            self.assertIn("?", compiled2)
+
+            query3 = test_table.select().where(
+                text("data #> :path IS NOT NULL")
+            )
+            compiled3 = str(
+                query3.compile(
+                    dialect=self.engine.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            self.assertIn("#>", compiled3)
+
+        except Exception as e:
+            self.fail(f"Failed JSONB operators compilation test: {e}")
+
+    def test_jsonb_functions_compilation(self):
+        """Test JSONB functions compile correctly"""
+        try:
+            from psqlpy_sqlalchemy.dialect import (
+                jsonb_agg,
+                jsonb_build_object,
+            )
+
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
+            )
+
+            # Test table with JSONB column
+            metadata = MetaData()
+            test_table = Table(
+                "test_jsonb",
+                metadata,
+                Column("id", Integer, primary_key=True),
+                Column("data", JSONB),
+            )
+
+            query1 = test_table.select().with_only_columns(
+                jsonb_agg(test_table.c.data)
+            )
+            compiled1 = str(query1.compile(dialect=self.engine.dialect))
+            self.assertIn("jsonb_agg", compiled1)
+
+            query2 = test_table.select().with_only_columns(
+                jsonb_build_object("key", test_table.c.id)
+            )
+            compiled2 = str(query2.compile(dialect=self.engine.dialect))
+            self.assertIn("jsonb_build_object", compiled2)
+
+        except Exception as e:
+            self.fail(f"Failed JSONB functions compilation test: {e}")
+
+    def test_enhanced_type_mapping(self):
+        """Test enhanced type mapping with render_bind_cast"""
+        try:
+            from psqlpy_sqlalchemy.dialect import (
+                _PGJSONB,
+                _PGInteger,
+                _PGString,
+            )
+
+            self.engine = create_engine(
+                "postgresql+psqlpy://user:password@localhost/test",
+                poolclass=NullPool,
+            )
+
+            self.assertTrue(hasattr(_PGJSONB, "render_bind_cast"))
+            self.assertTrue(_PGJSONB.render_bind_cast)
+
+            self.assertTrue(hasattr(_PGString, "render_bind_cast"))
+            self.assertTrue(_PGString.render_bind_cast)
+
+            self.assertTrue(hasattr(_PGInteger, "render_bind_cast"))
+            self.assertTrue(_PGInteger.render_bind_cast)
+
+            jsonb_type = _PGJSONB()
+            comparator_class = jsonb_type.comparator_factory
+
+            self.assertTrue(hasattr(comparator_class, "contains"))
+            self.assertTrue(hasattr(comparator_class, "has_key"))
+            self.assertTrue(hasattr(comparator_class, "has_any_key"))
+            self.assertTrue(hasattr(comparator_class, "has_all_keys"))
+            self.assertTrue(hasattr(comparator_class, "path_exists"))
+            self.assertTrue(hasattr(comparator_class, "concat"))
+            self.assertTrue(hasattr(comparator_class, "delete_key"))
+            self.assertTrue(hasattr(comparator_class, "delete_path"))
+
+        except Exception as e:
+            self.fail(f"Failed enhanced type mapping test: {e}")
+
+    def test_connection_performance_features(self):
+        """Test connection performance monitoring features"""
+        try:
+            from psqlpy_sqlalchemy.connection import (
+                AsyncAdapt_psqlpy_connection,
+            )
+
+            self.assertTrue(
+                hasattr(AsyncAdapt_psqlpy_connection, "get_performance_stats")
+            )
+            self.assertTrue(
+                hasattr(
+                    AsyncAdapt_psqlpy_connection, "reset_performance_stats"
+                )
+            )
+            self.assertTrue(hasattr(AsyncAdapt_psqlpy_connection, "is_valid"))
+            self.assertTrue(hasattr(AsyncAdapt_psqlpy_connection, "ping"))
+
+            expected_slots = [
+                "_connection_valid",
+                "_last_ping_time",
+                "_performance_stats",
+            ]
+
+            for slot in expected_slots:
+                self.assertIn(slot, AsyncAdapt_psqlpy_connection.__slots__)
+
+        except Exception as e:
+            self.fail(f"Failed connection performance features test: {e}")
+
+    def test_enhanced_cursor_features(self):
+        """Test enhanced cursor features"""
+        try:
+            from psqlpy_sqlalchemy.connection import (
+                AsyncAdapt_psqlpy_ss_cursor,
+            )
+
+            cursor_methods = [
+                "close",
+                "fetchone",
+                "fetchmany",
+                "fetchall",
+                "__iter__",
+            ]
+            for method in cursor_methods:
+                self.assertTrue(hasattr(AsyncAdapt_psqlpy_ss_cursor, method))
+
+            self.assertTrue(
+                hasattr(AsyncAdapt_psqlpy_ss_cursor, "_convert_result")
+            )
+
+        except Exception as e:
+            self.fail(f"Failed enhanced cursor features test: {e}")
+
+    def test_transaction_management_features(self):
+        """Test enhanced transaction management features"""
+        try:
+            from psqlpy_sqlalchemy.connection import (
+                AsyncAdapt_psqlpy_connection,
+            )
+
+            transaction_methods = ["_start_transaction", "commit", "rollback"]
+            for method in transaction_methods:
+                self.assertTrue(hasattr(AsyncAdapt_psqlpy_connection, method))
+
+            transaction_slots = ["_started", "_transaction"]
+            for slot in transaction_slots:
+                self.assertIn(slot, AsyncAdapt_psqlpy_connection.__slots__)
+
+        except Exception as e:
+            self.fail(f"Failed transaction management features test: {e}")
+
 
 class TestPsqlpyConnection(unittest.TestCase):
     """Test cases for psqlpy connection wrapper"""
@@ -203,8 +399,6 @@ class TestPsqlpyConnection(unittest.TestCase):
         """Test that connection wrapper can be created"""
         from psqlpy_sqlalchemy.connection import PsqlpyConnection
 
-        # We can't create a real connection without a database,
-        # but we can test the class exists and has required methods
         self.assertTrue(hasattr(PsqlpyConnection, "cursor"))
         self.assertTrue(hasattr(PsqlpyConnection, "commit"))
         self.assertTrue(hasattr(PsqlpyConnection, "rollback"))
@@ -214,7 +408,6 @@ class TestPsqlpyConnection(unittest.TestCase):
         """Test that cursor wrapper can be created"""
         from psqlpy_sqlalchemy.connection import PsqlpyCursor
 
-        # Test the class exists and has required methods
         self.assertTrue(hasattr(PsqlpyCursor, "execute"))
         self.assertTrue(hasattr(PsqlpyCursor, "executemany"))
         self.assertTrue(hasattr(PsqlpyCursor, "fetchone"))

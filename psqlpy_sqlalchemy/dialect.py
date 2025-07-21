@@ -6,10 +6,89 @@ import psqlpy
 from sqlalchemy import URL, util
 from sqlalchemy.dialects.postgresql.base import INTERVAL, PGDialect
 from sqlalchemy.dialects.postgresql.json import JSONPathType
-from sqlalchemy.sql import sqltypes
+from sqlalchemy.sql import operators, sqltypes
+from sqlalchemy.sql.functions import GenericFunction
 
 from .connection import AsyncAdapt_psqlpy_connection, PGExecutionContext_psqlpy
 from .dbapi import PSQLPyAdaptDBAPI
+
+
+# JSONB aggregation functions
+class jsonb_agg(GenericFunction):
+    """JSONB aggregation function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_agg"
+
+
+class jsonb_object_agg(GenericFunction):
+    """JSONB object aggregation function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_object_agg"
+
+
+class jsonb_build_array(GenericFunction):
+    """JSONB build array function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_build_array"
+
+
+class jsonb_build_object(GenericFunction):
+    """JSONB build object function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_build_object"
+
+
+class jsonb_extract_path(GenericFunction):
+    """JSONB extract path function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_extract_path"
+
+
+class jsonb_extract_path_text(GenericFunction):
+    """JSONB extract path as text function"""
+
+    type = sqltypes.Text
+    name = "jsonb_extract_path_text"
+
+
+class jsonb_path_exists(GenericFunction):
+    """JSONB path exists function"""
+
+    type = sqltypes.Boolean
+    name = "jsonb_path_exists"
+
+
+class jsonb_path_match(GenericFunction):
+    """JSONB path match function"""
+
+    type = sqltypes.Boolean
+    name = "jsonb_path_match"
+
+
+class jsonb_path_query(GenericFunction):
+    """JSONB path query function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_path_query"
+
+
+class jsonb_path_query_array(GenericFunction):
+    """JSONB path query array function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_path_query_array"
+
+
+class jsonb_path_query_first(GenericFunction):
+    """JSONB path query first function"""
+
+    type = sqltypes.JSON
+    name = "jsonb_path_query_first"
 
 
 # Custom type classes with render_bind_cast for better PostgreSQL compatibility
@@ -28,7 +107,59 @@ class _PGJSONStrIndexType(sqltypes.JSON.JSONStrIndexType):
 
 
 class _PGJSONPathType(JSONPathType):
-    pass
+    render_bind_cast = True
+
+
+class _PGJSONB(sqltypes.JSON):
+    """Enhanced JSONB type with PostgreSQL-specific operators"""
+
+    __visit_name__ = "JSONB"
+    render_bind_cast = True
+
+    class Comparator(sqltypes.JSON.Comparator):
+        """Enhanced comparator with JSONB-specific operators"""
+
+        def contains(self, other):
+            """JSONB containment operator @>"""
+            return self.operate(operators.custom_op("@>"), other)
+
+        def contained_by(self, other):
+            """JSONB contained by operator <@"""
+            return self.operate(operators.custom_op("<@"), other)
+
+        def has_key(self, key):
+            """JSONB has key operator ?"""
+            return self.operate(operators.custom_op("?"), key)
+
+        def has_any_key(self, keys):
+            """JSONB has any key operator ?|"""
+            return self.operate(operators.custom_op("?|"), keys)
+
+        def has_all_keys(self, keys):
+            """JSONB has all keys operator ?&"""
+            return self.operate(operators.custom_op("?&"), keys)
+
+        def path_exists(self, path):
+            """JSONB path exists operator @?"""
+            return self.operate(operators.custom_op("@?"), path)
+
+        def path_match(self, path):
+            """JSONB path match operator @@"""
+            return self.operate(operators.custom_op("@@"), path)
+
+        def concat(self, other):
+            """JSONB concatenation operator ||"""
+            return self.operate(operators.custom_op("||"), other)
+
+        def delete_key(self, key):
+            """JSONB delete key operator -"""
+            return self.operate(operators.custom_op("-"), key)
+
+        def delete_path(self, path):
+            """JSONB delete path operator #-"""
+            return self.operate(operators.custom_op("#-"), path)
+
+    comparator_factory = Comparator
 
 
 class _PGInterval(INTERVAL):
@@ -99,6 +230,7 @@ class PSQLPyAsyncDialect(PGDialect):
         PGDialect.colspecs,
         {
             sqltypes.String: _PGString,
+            sqltypes.JSON: _PGJSONB,  # Enhanced JSONB support
             sqltypes.JSON.JSONPathType: _PGJSONPathType,
             sqltypes.JSON.JSONIntIndexType: _PGJSONIntIndexType,
             sqltypes.JSON.JSONStrIndexType: _PGJSONStrIndexType,

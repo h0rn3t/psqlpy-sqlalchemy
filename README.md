@@ -186,10 +186,6 @@ pip install -e ".[dev]"
 ### Running Tests
 
 ```bash
-# Run basic dialect tests
-python test_dialect.py
-
-# Run with pytest (if available)
 pytest tests/
 ```
 
