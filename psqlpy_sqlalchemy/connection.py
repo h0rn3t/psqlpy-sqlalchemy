@@ -90,8 +90,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
             if self.server_side:
                 self._cursor = self._connection.cursor(
-                    querystring,
-                    parameters,
+                    converted_query,
+                    converted_params,
                 )
                 await self._cursor.start()
                 self._rowcount = -1
