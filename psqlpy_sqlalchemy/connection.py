@@ -59,10 +59,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         ):
             await self._adapt_connection._start_transaction()
 
+        # Process parameters to ensure proper type conversion (especially for UUIDs)
+        processed_parameters = self._process_parameters(parameters)
+
         try:
             prepared_stmt = await self._connection.prepare(
                 querystring=querystring,
-                parameters=parameters,
+                parameters=processed_parameters,
             )
 
             self._description = [
@@ -108,6 +111,41 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             self._adapt_connection._connection_valid = False
             raise
 
+    def _process_parameters(
+        self,
+        parameters: t.Union[
+            t.Sequence[t.Any], t.Mapping[str, Any], None
+        ] = None,
+    ) -> t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]:
+        """Process parameters to ensure proper type conversion for psqlpy."""
+        if parameters is None:
+            return None
+
+        import uuid
+
+        def process_value(value):
+            """Process a single parameter value."""
+            if value is None:
+                return None
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            if isinstance(value, str):
+                try:
+                    uuid.UUID(value)
+                    return value
+                except ValueError:
+                    return value
+            return value
+
+        if isinstance(parameters, dict):
+            return {
+                key: process_value(value) for key, value in parameters.items()
+            }
+        elif isinstance(parameters, (list, tuple)):
+            return [process_value(value) for value in parameters]
+        else:
+            return process_value(parameters)
+
     @property
     def description(self) -> "Optional[_DBAPICursorDescription]":
         return self._description
@@ -136,9 +174,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if not adapt_connection._started:
             await adapt_connection._start_transaction()
 
+        processed_seq = [
+            self._process_parameters(params) for params in seq_of_parameters
+        ]
+
         return await self._connection.execute_many(
             operation,
-            seq_of_parameters,
+            processed_seq,
             True,
         )
 
