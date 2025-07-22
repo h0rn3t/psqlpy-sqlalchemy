@@ -235,12 +235,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 f"Parameters dict: {parameters!r}"
             )
 
-            raise ValueError(
-                f"Missing parameters in query: {missing_params}. "
-                f"Query contains parameters {found_params} "
-                f"but parameters dict only has {available_params}. "
-                f"This may indicate a parameter processing issue in the execution pipeline."
+            # Instead of raising an error, return the original query and parameters
+            # This prevents partial conversion which can cause SQL syntax errors
+            logger.warning(
+                "Returning original query due to missing parameters. "
+                "This may indicate a parameter processing issue."
             )
+            return querystring, parameters
 
         # Convert the query string by replacing each parameter with its positional equivalent
         converted_query = querystring
