@@ -188,13 +188,25 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         # Build the conversion mapping and new parameter list
         param_order = []
         seen_params = set()
+        missing_params = []
 
         # Process matches to determine parameter order (first occurrence wins)
         for match in matches:
             param_name = match.group(1)
-            if param_name not in seen_params and param_name in parameters:
-                param_order.append(param_name)
-                seen_params.add(param_name)
+            if param_name not in seen_params:
+                if param_name in parameters:
+                    param_order.append(param_name)
+                    seen_params.add(param_name)
+                else:
+                    missing_params.append(param_name)
+
+        # Defensive check: ensure all parameters found in query are available
+        if missing_params:
+            raise ValueError(
+                f"Missing parameters in query: {missing_params}. "
+                f"Query contains parameters {[m.group(1) for m in matches]} "
+                f"but parameters dict only has {list(parameters.keys())}"
+            )
 
         # Convert the query string by replacing each parameter with its positional equivalent
         converted_query = querystring
@@ -205,14 +217,53 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 f":({re.escape(param_name)})" + r"(::[\w\[\]]+)?"
             )
             replacement = f"${i}\\2"  # $N + casting part (group 2)
-            converted_query = re.sub(
+
+            # Perform replacement and verify it worked
+            new_query = re.sub(
                 param_pattern_specific, replacement, converted_query
             )
+
+            # Defensive check: ensure replacement actually occurred
+            if (
+                new_query == converted_query
+                and f":{param_name}" in converted_query
+            ):
+                raise RuntimeError(
+                    f"Failed to replace parameter '{param_name}' in query. "
+                    f"Pattern: {param_pattern_specific}, Query: {converted_query}"
+                )
+
+            converted_query = new_query
 
         # Convert parameters dict to list in the correct order
         converted_params = [
             parameters[param_name] for param_name in param_order
         ]
+
+        # Final defensive check: ensure no named parameters remain in the converted query
+        # Look for the original parameter pattern, but exclude matches that are part of casting syntax
+        remaining_matches = []
+        for match in re.finditer(param_pattern, converted_query):
+            full_match = match.group(0)
+            param_name = match.group(1)
+            # Check if this looks like a real parameter (not casting syntax)
+            # Real parameters should not be preceded by a positional parameter like $1, $2, etc.
+            start_pos = match.start()
+            if start_pos > 0:
+                # Look at the characters before the match
+                preceding_text = converted_query[
+                    max(0, start_pos - 3) : start_pos
+                ]
+                # If preceded by $N, this is likely casting syntax, not a parameter
+                if re.search(r"\$\d+$", preceding_text):
+                    continue
+            remaining_matches.append(full_match)
+
+        if remaining_matches:
+            raise RuntimeError(
+                f"Conversion incomplete: named parameters still present in query: {remaining_matches}. "
+                f"Converted query: {converted_query}, Original query: {querystring}"
+            )
 
         return converted_query, converted_params
 
