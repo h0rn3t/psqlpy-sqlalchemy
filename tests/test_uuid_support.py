@@ -34,20 +34,27 @@ def _is_docker_postgres_available():
     try:
         import socket
         import subprocess
-        
+
         # Check if Docker is installed and running
         try:
             result = subprocess.run(
-                ["docker", "ps", "--filter", "name=psqlpy-postgres", "--format", "{{.Names}}"],
+                [
+                    "docker",
+                    "ps",
+                    "--filter",
+                    "name=psqlpy-postgres",
+                    "--format",
+                    "{{.Names}}",
+                ],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
             )
             if "psqlpy-postgres" in result.stdout:
                 # Container is running, check if PostgreSQL is accessible
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
-                result = sock.connect_ex(('localhost', 5432))
+                result = sock.connect_ex(("localhost", 5432))
                 sock.close()
                 return result == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -156,7 +163,7 @@ class TestUUIDParameterBinding:
 
     async def test_uuid_with_explicit_cast(self, engine):
         """Test UUID parameter handling without problematic explicit casting syntax.
-        
+
         This test demonstrates the correct way to handle UUID parameters:
         - Use named parameters without explicit casting (SQLAlchemy handles type conversion)
         - Avoid the combination of named parameters with explicit PostgreSQL casting syntax
@@ -184,7 +191,7 @@ class TestUUIDParameterBinding:
             rows = result.fetchall()
             assert len(rows) == 1
             assert rows[0].name == "test_cast"
-            
+
             # Also test with UUID object (not just string)
             result2 = await conn.execute(
                 text(

@@ -42,13 +42,14 @@ class TestPoolclassCompatibility(unittest.TestCase):
                 except RuntimeError:
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-                
+
                 # Run the disposal in the event loop
                 if not loop.is_running():
                     loop.run_until_complete(self.async_engine.dispose())
                 else:
                     # If loop is already running, create a task
                     import concurrent.futures
+
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         future = executor.submit(
                             lambda: asyncio.run(self.async_engine.dispose())
