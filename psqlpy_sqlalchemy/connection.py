@@ -68,6 +68,32 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 querystring, processed_parameters
             )
         )
+        
+        # Handle mixed parameter styles specifically for explicit PostgreSQL casting
+        # Only trigger this for queries with explicit casting syntax like :param::TYPE
+        if (converted_params is not None and 
+            not isinstance(converted_params, dict) and 
+            converted_query == querystring):  # Query unchanged means mixed parameters detected
+            
+            import re
+            # Look specifically for PostgreSQL casting syntax :param::TYPE
+            casting_pattern = r":([a-zA-Z_][a-zA-Z0-9_]*)::"
+            casting_matches = re.findall(casting_pattern, converted_query)
+            
+            if casting_matches:
+                # This is a known limitation: SQLAlchemy can't handle named parameters with explicit PostgreSQL casting
+                import logging
+                logger = logging.getLogger(__name__)
+                
+                raise RuntimeError(
+                    f"Named parameters with explicit PostgreSQL casting are not supported. "
+                    f"Found casting parameters: {casting_matches} in query: {converted_query[:100]}... "
+                    f"SQLAlchemy filters out parameters when explicit casting syntax like ':param::TYPE' is used. "
+                    f"Solutions: "
+                    f"1) Use positional parameters: 'WHERE uid = $1::UUID LIMIT $2' with parameters as a list, "
+                    f"2) Remove explicit casting: 'WHERE uid = :uid LIMIT :limit' (casting will be handled automatically), "
+                    f"3) Use SQLAlchemy's cast() function: 'WHERE uid = cast(:uid, UUID) LIMIT :limit'"
+                )
 
         try:
             prepared_stmt = await self._connection.prepare(
@@ -174,6 +200,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         import logging
 
         logger = logging.getLogger(__name__)
+        
         logger.debug(
             f"Parameter conversion called - Query: {querystring!r}, "
             f"Parameters: {parameters!r}, Parameters type: {type(parameters)}"

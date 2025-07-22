@@ -229,15 +229,21 @@ class _PGUUID(UUID):
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
-                return str(value)
+                # Convert UUID objects to bytes for psqlpy
+                return value.bytes
             if isinstance(value, str):
-                # Validate that it's a proper UUID string
+                # Validate and convert UUID strings to bytes
                 try:
-                    uuid.UUID(value)
-                    return value
+                    parsed_uuid = uuid.UUID(value)
+                    return parsed_uuid.bytes
                 except ValueError:
                     raise ValueError(f"Invalid UUID string: {value}")
-            return str(value)
+            # For other types, try to convert to UUID first
+            try:
+                parsed_uuid = uuid.UUID(str(value))
+                return parsed_uuid.bytes
+            except ValueError:
+                raise ValueError(f"Cannot convert {value!r} to UUID")
 
         return process
 

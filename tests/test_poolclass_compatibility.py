@@ -32,12 +32,29 @@ class TestPoolclassCompatibility(unittest.TestCase):
         if self.engine:
             self.engine.dispose()
         if self.async_engine:
-            # Use asyncio to properly dispose async engine
+            # Properly dispose async engine without warnings
             try:
-                asyncio.get_event_loop().run_until_complete(
-                    self.async_engine.dispose()
-                )
-            except Exception as _:
+                # Create a new event loop for cleanup if needed
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Event loop is closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the disposal in the event loop
+                if not loop.is_running():
+                    loop.run_until_complete(self.async_engine.dispose())
+                else:
+                    # If loop is already running, create a task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            lambda: asyncio.run(self.async_engine.dispose())
+                        )
+                        future.result(timeout=5)
+            except Exception:
                 pass  # Ignore disposal errors in tests
 
     def test_dialect_has_asyncadaptedqueuepool_by_default(self):
