@@ -170,7 +170,17 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         And converts the parameters dict to a list in the correct order.
         """
+        # Add debugging logging for CI troubleshooting
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            f"Parameter conversion called - Query: {querystring!r}, "
+            f"Parameters: {parameters!r}, Parameters type: {type(parameters)}"
+        )
+
         if parameters is None or not isinstance(parameters, dict):
+            logger.debug("Parameters is None or not dict, returning as-is")
             return querystring, parameters
 
         import re
@@ -182,7 +192,14 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         # Find all parameter references in the query
         matches = list(re.finditer(param_pattern, querystring))
 
+        logger.debug(f"Found {len(matches)} parameter matches in query")
+        for i, match in enumerate(matches):
+            logger.debug(
+                f"  Match {i + 1}: '{match.group(0)}' -> param='{match.group(1)}', cast='{match.group(2)}'"
+            )
+
         if not matches:
+            logger.debug("No parameter matches found, returning as-is")
             return querystring, parameters
 
         # Build the conversion mapping and new parameter list
@@ -202,10 +219,27 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         # Defensive check: ensure all parameters found in query are available
         if missing_params:
+            # Enhanced error message with more debugging information
+            available_params = list(parameters.keys()) if parameters else []
+            found_params = [m.group(1) for m in matches]
+
+            # Log additional debugging information for CI troubleshooting
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f"Parameter conversion error - Missing parameters: {missing_params}. "
+                f"Query: {querystring!r}. "
+                f"Found in query: {found_params}. "
+                f"Available in dict: {available_params}. "
+                f"Parameters dict: {parameters!r}"
+            )
+
             raise ValueError(
                 f"Missing parameters in query: {missing_params}. "
-                f"Query contains parameters {[m.group(1) for m in matches]} "
-                f"but parameters dict only has {list(parameters.keys())}"
+                f"Query contains parameters {found_params} "
+                f"but parameters dict only has {available_params}. "
+                f"This may indicate a parameter processing issue in the execution pipeline."
             )
 
         # Convert the query string by replacing each parameter with its positional equivalent
@@ -268,6 +302,16 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 f"Conversion incomplete: named parameters still present in query: {remaining_matches}. "
                 f"Converted query: {converted_query}, Original query: {querystring}"
             )
+
+        # Log final conversion results for debugging
+        logger.debug(
+            f"Parameter conversion completed - "
+            f"Original query: {querystring!r}, "
+            f"Converted query: {converted_query!r}, "
+            f"Original params: {parameters!r}, "
+            f"Converted params: {converted_params!r}, "
+            f"Parameter order: {param_order}"
+        )
 
         return converted_query, converted_params
 
