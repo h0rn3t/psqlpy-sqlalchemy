@@ -250,11 +250,15 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             # Real parameters should not be preceded by a positional parameter like $1, $2, etc.
             start_pos = match.start()
             if start_pos > 0:
-                # Look at the characters before the match
+                # Look at the characters before the match to see if this is casting syntax
+                # For casting syntax like $1::UUID, we need to check if preceded by $N:
                 preceding_text = converted_query[
-                    max(0, start_pos - 3) : start_pos
+                    max(0, start_pos - 4) : start_pos
                 ]
-                # If preceded by $N, this is likely casting syntax, not a parameter
+                # If preceded by $N: (positional parameter followed by colon), this is casting syntax
+                if re.search(r"\$\d+:$", preceding_text):
+                    continue
+                # Also check the older pattern for backward compatibility
                 if re.search(r"\$\d+$", preceding_text):
                     continue
             remaining_matches.append(full_match)
