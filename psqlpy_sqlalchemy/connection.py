@@ -62,10 +62,17 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         # Process parameters to ensure proper type conversion (especially for UUIDs)
         processed_parameters = self._process_parameters(parameters)
 
+        # Convert named parameters with casting syntax to positional parameters
+        converted_query, converted_params = (
+            self._convert_named_params_with_casting(
+                querystring, processed_parameters
+            )
+        )
+
         try:
             prepared_stmt = await self._connection.prepare(
-                querystring=querystring,
-                parameters=processed_parameters,
+                querystring=converted_query,
+                parameters=converted_params,
             )
 
             self._description = [
@@ -145,6 +152,69 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             return [process_value(value) for value in parameters]
         else:
             return process_value(parameters)
+
+    def _convert_named_params_with_casting(
+        self,
+        querystring: str,
+        parameters: t.Union[
+            t.Sequence[t.Any], t.Mapping[str, Any], None
+        ] = None,
+    ) -> t.Tuple[str, t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]]:
+        """Convert named parameters with PostgreSQL casting syntax to positional parameters.
+
+        Transforms queries like:
+        'SELECT * FROM table WHERE col = :param::UUID LIMIT :limit'
+
+        To:
+        'SELECT * FROM table WHERE col = $1::UUID LIMIT $2'
+
+        And converts the parameters dict to a list in the correct order.
+        """
+        if parameters is None or not isinstance(parameters, dict):
+            return querystring, parameters
+
+        import re
+
+        # Find all named parameters with optional casting syntax
+        # Pattern matches :param_name optionally followed by ::TYPE
+        param_pattern = r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?"
+
+        # Find all parameter references in the query
+        matches = list(re.finditer(param_pattern, querystring))
+
+        if not matches:
+            return querystring, parameters
+
+        # Build the conversion mapping and new parameter list
+        param_order = []
+        seen_params = set()
+
+        # Process matches to determine parameter order (first occurrence wins)
+        for match in matches:
+            param_name = match.group(1)
+            if param_name not in seen_params and param_name in parameters:
+                param_order.append(param_name)
+                seen_params.add(param_name)
+
+        # Convert the query string by replacing each parameter with its positional equivalent
+        converted_query = querystring
+
+        for i, param_name in enumerate(param_order, 1):
+            # Replace all occurrences of this parameter with $N, preserving any casting
+            param_pattern_specific = (
+                f":({re.escape(param_name)})" + r"(::[\w\[\]]+)?"
+            )
+            replacement = f"${i}\\2"  # $N + casting part (group 2)
+            converted_query = re.sub(
+                param_pattern_specific, replacement, converted_query
+            )
+
+        # Convert parameters dict to list in the correct order
+        converted_params = [
+            parameters[param_name] for param_name in param_order
+        ]
+
+        return converted_query, converted_params
 
     @property
     def description(self) -> "Optional[_DBAPICursorDescription]":
