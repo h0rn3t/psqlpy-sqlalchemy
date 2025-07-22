@@ -128,11 +128,11 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
-                return str(value)
+                return value.bytes
             if isinstance(value, str):
                 try:
-                    uuid.UUID(value)
-                    return value
+                    parsed_uuid = uuid.UUID(value)
+                    return parsed_uuid.bytes
                 except ValueError:
                     return value
             return value
