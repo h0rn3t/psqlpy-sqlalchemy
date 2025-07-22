@@ -16,12 +16,12 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 # Skip tests if database is not available (check for CI environment or explicit flag)
 def should_skip_db_tests():
     """Check if database tests should be skipped."""
-    # Run tests in CI environment
-    if os.getenv("GITHUB_ACTIONS"):
-        return False
     # Run tests if explicitly enabled
     if os.getenv("RUN_DB_TESTS"):
         return False
+    # In GitHub Actions, only run tests if DATABASE_URL is set (Linux job has it, others don't)
+    if os.getenv("GITHUB_ACTIONS"):
+        return not bool(os.getenv("DATABASE_URL"))
     # Skip by default in local development
     return True
 
