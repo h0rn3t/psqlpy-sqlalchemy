@@ -12,16 +12,18 @@ class PSQLPyAdaptDBAPI:
         self.apilevel = "2.0"
         self.threadsafety = 2  # Threads may share the module and connections
 
-        self.Warning = psqlpy.Error
-        self.Error = psqlpy.Error
-        self.InterfaceError = psqlpy.Error
-        self.DatabaseError = psqlpy.Error
-        self.DataError = psqlpy.Error
-        self.OperationalError = psqlpy.Error
-        self.IntegrityError = psqlpy.Error
-        self.InternalError = psqlpy.Error
-        self.ProgrammingError = psqlpy.Error
-        self.NotSupportedError = psqlpy.Error
+        # Single reusable exception class for all error types
+        _error_class = psqlpy.Error
+        self.Warning = _error_class
+        self.Error = _error_class
+        self.InterfaceError = _error_class
+        self.DatabaseError = _error_class
+        self.DataError = _error_class
+        self.OperationalError = _error_class
+        self.IntegrityError = _error_class
+        self.InternalError = _error_class
+        self.ProgrammingError = _error_class
+        self.NotSupportedError = _error_class
 
         for k, v in self.psqlpy.__dict__.items():
             if k != "connect":
@@ -39,34 +41,36 @@ class PSQLPyAdaptDBAPI:
             # Add other server_settings mappings as needed
 
         # Filter out any other unsupported parameters that SQLAlchemy might pass
-        supported_params = {
-            "dsn",
-            "username",
-            "password",
-            "host",
-            "hosts",
-            "port",
-            "ports",
-            "db_name",
-            "target_session_attrs",
-            "options",
-            "application_name",
-            "connect_timeout_sec",
-            "connect_timeout_nanosec",
-            "tcp_user_timeout_sec",
-            "tcp_user_timeout_nanosec",
-            "keepalives",
-            "keepalives_idle_sec",
-            "keepalives_idle_nanosec",
-            "keepalives_interval_sec",
-            "keepalives_interval_nanosec",
-            "keepalives_retries",
-            "load_balance_hosts",
-            "max_db_pool_size",
-            "conn_recycling_method",
-            "ssl_mode",
-            "ca_file",
-        }
+        supported_params = frozenset(
+            {
+                "dsn",
+                "username",
+                "password",
+                "host",
+                "hosts",
+                "port",
+                "ports",
+                "db_name",
+                "target_session_attrs",
+                "options",
+                "application_name",
+                "connect_timeout_sec",
+                "connect_timeout_nanosec",
+                "tcp_user_timeout_sec",
+                "tcp_user_timeout_nanosec",
+                "keepalives",
+                "keepalives_idle_sec",
+                "keepalives_idle_nanosec",
+                "keepalives_interval_sec",
+                "keepalives_interval_nanosec",
+                "keepalives_retries",
+                "load_balance_hosts",
+                "max_db_pool_size",
+                "conn_recycling_method",
+                "ssl_mode",
+                "ca_file",
+            }
+        )
 
         filtered_kw = {k: v for k, v in kw.items() if k in supported_params}
 
@@ -90,17 +94,18 @@ class PsqlpyDBAPI:
 
         self._adapt_dbapi = PSQLPyAdaptDBAPI(psqlpy)
 
-        # Copy attributes from psqlpy for compatibility
-        self.Warning = psqlpy.Error
-        self.Error = psqlpy.Error
-        self.InterfaceError = psqlpy.Error
-        self.DatabaseError = psqlpy.Error
-        self.DataError = psqlpy.Error
-        self.OperationalError = psqlpy.Error
-        self.IntegrityError = psqlpy.Error
-        self.InternalError = psqlpy.Error
-        self.ProgrammingError = psqlpy.Error
-        self.NotSupportedError = psqlpy.Error
+        # Single reusable exception class for all error types
+        _error_class = psqlpy.Error
+        self.Warning = _error_class
+        self.Error = _error_class
+        self.InterfaceError = _error_class
+        self.DatabaseError = _error_class
+        self.DataError = _error_class
+        self.OperationalError = _error_class
+        self.IntegrityError = _error_class
+        self.InternalError = _error_class
+        self.ProgrammingError = _error_class
+        self.NotSupportedError = _error_class
 
     # Type constructors
     def Date(self, year, month, day):

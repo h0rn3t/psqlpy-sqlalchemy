@@ -39,7 +39,7 @@ dev = [
     "greenlet>=1.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
-    "sqlmodel>=0.0.8",
+    "sqlmodel>=0.0.14",
     "pytest-cov",
     "fastapi>=0.68.0",
     "starlette>=0.14.0",

@@ -416,5 +416,269 @@ class TestPsqlpyConnection(unittest.TestCase):
         self.assertTrue(hasattr(PsqlpyCursor, "close"))
 
 
+class TestJSONBOperators(unittest.TestCase):
+    """Test cases for JSONB operators"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        from psqlpy_sqlalchemy.dialect import _PGJSONB
+
+        self.jsonb_type = _PGJSONB()
+
+    def test_jsonb_contains_operator(self):
+        """Test JSONB contains operator @>"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test contains operator directly through comparator
+        comparator = col.comparator
+        expr = comparator.contains({"key": "value"})
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_contained_by_operator(self):
+        """Test JSONB contained by operator <@"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test contained_by operator
+        expr = col.contained_by({"key": "value"})
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_has_key_operator(self):
+        """Test JSONB has key operator ?"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test has_key operator
+        expr = col.has_key("test_key")
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_has_any_key_operator(self):
+        """Test JSONB has any key operator ?|"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test has_any_key operator
+        expr = col.has_any_key(["key1", "key2"])
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_has_all_keys_operator(self):
+        """Test JSONB has all keys operator ?&"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test has_all_keys operator
+        expr = col.has_all_keys(["key1", "key2"])
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_path_exists_operator(self):
+        """Test JSONB path exists operator @?"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test path_exists operator
+        expr = col.path_exists("$.key")
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_path_match_operator(self):
+        """Test JSONB path match operator @@"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test path_match operator
+        expr = col.path_match('$.key == "value"')
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_concat_operator(self):
+        """Test JSONB concatenation operator ||"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test concat operator
+        expr = col.concat({"new_key": "new_value"})
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_delete_key_operator(self):
+        """Test JSONB delete key operator -"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test delete_key operator
+        expr = col.delete_key("unwanted_key")
+        self.assertIsNotNone(expr)
+
+    def test_jsonb_delete_path_operator(self):
+        """Test JSONB delete path operator #-"""
+        from sqlalchemy import Column, MetaData, Table
+
+        metadata = MetaData()
+        test_table = Table("test", metadata, Column("data", self.jsonb_type))
+        col = test_table.c.data
+
+        # Test delete_path operator
+        expr = col.delete_path(["path", "to", "key"])
+        self.assertIsNotNone(expr)
+
+
+class TestUUIDBindProcessor(unittest.TestCase):
+    """Test cases for UUID bind processor"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        from psqlpy_sqlalchemy.dialect import _PGUUID, PSQLPyAsyncDialect
+
+        self.uuid_type = _PGUUID()
+        self.dialect = PSQLPyAsyncDialect()
+
+    def test_uuid_bind_processor_with_uuid_object(self):
+        """Test UUID bind processor with UUID object"""
+        import uuid
+
+        processor = self.uuid_type.bind_processor(self.dialect)
+        test_uuid = uuid.uuid4()
+
+        result = processor(test_uuid)
+        self.assertEqual(result, test_uuid.bytes)
+
+    def test_uuid_bind_processor_with_uuid_string(self):
+        """Test UUID bind processor with UUID string"""
+        import uuid
+
+        processor = self.uuid_type.bind_processor(self.dialect)
+        test_uuid = uuid.uuid4()
+        test_uuid_str = str(test_uuid)
+
+        result = processor(test_uuid_str)
+        self.assertEqual(result, test_uuid.bytes)
+
+    def test_uuid_bind_processor_with_none(self):
+        """Test UUID bind processor with None"""
+        processor = self.uuid_type.bind_processor(self.dialect)
+
+        result = processor(None)
+        self.assertIsNone(result)
+
+    def test_uuid_bind_processor_with_invalid_string(self):
+        """Test UUID bind processor with invalid string"""
+        processor = self.uuid_type.bind_processor(self.dialect)
+
+        with self.assertRaises(ValueError) as cm:
+            processor("invalid-uuid-string")
+
+        self.assertIn("Invalid UUID string", str(cm.exception))
+
+    def test_uuid_bind_processor_with_convertible_value(self):
+        """Test UUID bind processor with convertible value"""
+        import uuid
+
+        processor = self.uuid_type.bind_processor(self.dialect)
+        test_uuid = uuid.uuid4()
+
+        # Test with a value that can be converted to UUID
+        result = processor(str(test_uuid))
+        self.assertEqual(result, test_uuid.bytes)
+
+    def test_uuid_bind_processor_with_invalid_value(self):
+        """Test UUID bind processor with invalid value"""
+        processor = self.uuid_type.bind_processor(self.dialect)
+
+        with self.assertRaises(ValueError) as cm:
+            processor(12345)  # Invalid value that can't be converted to UUID
+
+        self.assertIn("Cannot convert", str(cm.exception))
+
+
+class TestDialectMethods(unittest.TestCase):
+    """Test cases for additional dialect methods"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        from psqlpy_sqlalchemy.dialect import PSQLPyAsyncDialect
+
+        self.dialect = PSQLPyAsyncDialect()
+
+    def test_dialect_initialization(self):
+        """Test dialect initialization"""
+        self.assertEqual(self.dialect.driver, "psqlpy")
+        self.assertTrue(self.dialect.is_async)
+        self.assertIsNotNone(self.dialect.poolclass)
+
+    def test_dialect_dbapi_property(self):
+        """Test dialect dbapi property"""
+        # This should trigger the dbapi property getter
+        # The dbapi property may return None if psqlpy is not available
+        dbapi = self.dialect.dbapi
+        # Just test that accessing the property doesn't raise an error
+        # The actual value depends on whether psqlpy is available
+        self.assertTrue(dbapi is None or hasattr(dbapi, "connect"))
+
+    def test_dialect_create_connect_args(self):
+        """Test create_connect_args method"""
+        from sqlalchemy import URL
+
+        url = URL.create(
+            "postgresql+psqlpy",
+            username="testuser",
+            password="testpass",
+            host="localhost",
+            port=5432,
+            database="testdb",
+        )
+
+        args, kwargs = self.dialect.create_connect_args(url)
+
+        self.assertEqual(args, [])  # Returns empty list, not tuple
+        self.assertIn("username", kwargs)
+        self.assertIn("password", kwargs)
+        self.assertIn("host", kwargs)
+        self.assertIn("port", kwargs)
+        self.assertIn("db_name", kwargs)
+
+    def test_dialect_get_isolation_level(self):
+        """Test get_isolation_level method"""
+        from unittest.mock import Mock
+
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = ["read committed"]
+
+        result = self.dialect.get_isolation_level(mock_connection)
+
+        # Should return the isolation level (uppercase)
+        self.assertEqual(result, "READ COMMITTED")
+        mock_cursor.execute.assert_called_once_with(
+            "show transaction isolation level"
+        )
+        mock_cursor.fetchone.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
