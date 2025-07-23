@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
 # Skip tests if database is not available (check for CI environment or explicit flag)
-def should_skip_db_tests():
+def should_skip_db_tests() -> bool:
     """Check if database tests should be skipped."""
     # Run tests if explicitly enabled
     if os.getenv("RUN_DB_TESTS"):
@@ -23,10 +23,7 @@ def should_skip_db_tests():
     if os.getenv("GITHUB_ACTIONS"):
         return not bool(os.getenv("DATABASE_URL"))
     # Check if Docker PostgreSQL is available locally
-    if _is_docker_postgres_available():
-        return False
-    # Skip by default in local development if no Docker
-    return True
+    return not _is_docker_postgres_available()
 
 
 def _is_docker_postgres_available():

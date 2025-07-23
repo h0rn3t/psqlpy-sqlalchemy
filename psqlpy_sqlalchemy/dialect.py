@@ -7,6 +7,7 @@ import psqlpy
 from sqlalchemy import URL, util
 from sqlalchemy.dialects.postgresql.base import INTERVAL, UUID, PGDialect
 from sqlalchemy.dialects.postgresql.json import JSONPathType
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 from sqlalchemy.sql import operators, sqltypes
 from sqlalchemy.sql.functions import GenericFunction
@@ -41,80 +42,80 @@ class CompatibleNullPool(NullPool):
 
 
 # JSONB aggregation functions
-class jsonb_agg(GenericFunction):
+class jsonb_agg(GenericFunction[t.Any]):
     """JSONB aggregation function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_agg"
 
 
-class jsonb_object_agg(GenericFunction):
+class jsonb_object_agg(GenericFunction[t.Any]):
     """JSONB object aggregation function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_object_agg"
 
 
-class jsonb_build_array(GenericFunction):
+class jsonb_build_array(GenericFunction[t.Any]):
     """JSONB build array function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_build_array"
 
 
-class jsonb_build_object(GenericFunction):
+class jsonb_build_object(GenericFunction[t.Any]):
     """JSONB build object function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_build_object"
 
 
-class jsonb_extract_path(GenericFunction):
+class jsonb_extract_path(GenericFunction[t.Any]):
     """JSONB extract path function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_extract_path"
 
 
-class jsonb_extract_path_text(GenericFunction):
+class jsonb_extract_path_text(GenericFunction[t.Any]):
     """JSONB extract path as text function"""
 
-    type = sqltypes.Text
+    type_ = sqltypes.Text
     name = "jsonb_extract_path_text"
 
 
-class jsonb_path_exists(GenericFunction):
+class jsonb_path_exists(GenericFunction[t.Any]):
     """JSONB path exists function"""
 
-    type = sqltypes.Boolean
+    type_ = sqltypes.Boolean
     name = "jsonb_path_exists"
 
 
-class jsonb_path_match(GenericFunction):
+class jsonb_path_match(GenericFunction[t.Any]):
     """JSONB path match function"""
 
-    type = sqltypes.Boolean
+    type_ = sqltypes.Boolean
     name = "jsonb_path_match"
 
 
-class jsonb_path_query(GenericFunction):
+class jsonb_path_query(GenericFunction[t.Any]):
     """JSONB path query function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_path_query"
 
 
-class jsonb_path_query_array(GenericFunction):
+class jsonb_path_query_array(GenericFunction[t.Any]):
     """JSONB path query array function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_path_query_array"
 
 
-class jsonb_path_query_first(GenericFunction):
+class jsonb_path_query_first(GenericFunction[t.Any]):
     """JSONB path query first function"""
 
-    type = sqltypes.JSON
+    type_ = sqltypes.JSON
     name = "jsonb_path_query_first"
 
 
@@ -143,10 +144,10 @@ class _PGJSONB(sqltypes.JSON):
     __visit_name__ = "JSONB"
     render_bind_cast = True
 
-    class Comparator(sqltypes.JSON.Comparator):
+    class Comparator(sqltypes.JSON.Comparator[t.Any]):
         """Enhanced comparator with JSONB-specific operators"""
 
-        def contains(self, other: t.Any) -> t.Any:
+        def contains(self, other: t.Any, **kw: t.Any) -> t.Any:
             """JSONB containment operator @>"""
             return self.operate(operators.custom_op("@>"), other)
 
@@ -225,7 +226,7 @@ class _PGNullType(sqltypes.NullType):
     render_bind_cast = True
 
 
-class _PGUUID(UUID):
+class _PGUUID(UUID[t.Any]):
     """PostgreSQL UUID type with proper parameter binding for psqlpy."""
 
     def bind_processor(
@@ -339,10 +340,13 @@ class PSQLPyAsyncDialect(PGDialect):
 
     def set_isolation_level(
         self,
-        dbapi_connection: AsyncAdapt_psqlpy_connection,
+        dbapi_connection: DBAPIConnection,
         level: t.Any,
     ) -> None:
-        dbapi_connection.set_isolation_level(self._isolation_lookup[level])
+        psqlpy_connection = t.cast(
+            AsyncAdapt_psqlpy_connection, dbapi_connection
+        )
+        psqlpy_connection.set_isolation_level(self._isolation_lookup[level])
 
     def set_readonly(self, connection: t.Any, value: t.Any) -> None:
         if value is True:

@@ -150,107 +150,103 @@ class TestPSQLPyAdaptDBAPI(unittest.TestCase):
 
     def test_server_settings_handling(self):
         """Test server_settings parameter handling"""
-        with patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"):
-            with patch(
-                "psqlpy_sqlalchemy.dbapi.await_only"
-            ) as mock_await_only:
-                mock_connection = Mock()
-                mock_await_only.return_value = mock_connection
+        with patch(
+            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
+        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+            mock_connection = Mock()
+            mock_await_only.return_value = mock_connection
 
-                # Test with server_settings containing application_name
-                server_settings = {
-                    "application_name": "test_app",
-                    "other_setting": "value",
-                }
+            # Test with server_settings containing application_name
+            server_settings = {
+                "application_name": "test_app",
+                "other_setting": "value",
+            }
 
-                self.adapt_dbapi.connect(
-                    host="localhost",
-                    port=5432,
-                    server_settings=server_settings,
-                    unsupported_param="should_be_filtered",
-                )
+            self.adapt_dbapi.connect(
+                host="localhost",
+                port=5432,
+                server_settings=server_settings,
+                unsupported_param="should_be_filtered",
+            )
 
-                # Verify that application_name was extracted from server_settings
-                mock_await_only.call_args[0][
-                    0
-                ]  # Get the first argument to await_only
-                # The call should have been made with the creator function
-                self.mock_psqlpy.connect.assert_called_once()
+            # Verify that application_name was extracted from server_settings
+            mock_await_only.call_args[0][
+                0
+            ]  # Get the first argument to await_only
+            # The call should have been made with the creator function
+            self.mock_psqlpy.connect.assert_called_once()
 
-                # Check that the kwargs passed to psqlpy.connect include application_name
-                # and exclude unsupported parameters
-                call_kwargs = self.mock_psqlpy.connect.call_args[1]
-                self.assertEqual(call_kwargs["application_name"], "test_app")
-                self.assertEqual(call_kwargs["host"], "localhost")
-                self.assertEqual(call_kwargs["port"], 5432)
-                self.assertNotIn("server_settings", call_kwargs)
-                self.assertNotIn("other_setting", call_kwargs)
-                self.assertNotIn("unsupported_param", call_kwargs)
+            # Check that the kwargs passed to psqlpy.connect include application_name
+            # and exclude unsupported parameters
+            call_kwargs = self.mock_psqlpy.connect.call_args[1]
+            self.assertEqual(call_kwargs["application_name"], "test_app")
+            self.assertEqual(call_kwargs["host"], "localhost")
+            self.assertEqual(call_kwargs["port"], 5432)
+            self.assertNotIn("server_settings", call_kwargs)
+            self.assertNotIn("other_setting", call_kwargs)
+            self.assertNotIn("unsupported_param", call_kwargs)
 
     def test_server_settings_without_application_name(self):
         """Test server_settings parameter handling without application_name"""
-        with patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"):
-            with patch(
-                "psqlpy_sqlalchemy.dbapi.await_only"
-            ) as mock_await_only:
-                mock_connection = Mock()
-                mock_await_only.return_value = mock_connection
+        with patch(
+            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
+        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+            mock_connection = Mock()
+            mock_await_only.return_value = mock_connection
 
-                # Test with server_settings not containing application_name
-                server_settings = {"other_setting": "value"}
+            # Test with server_settings not containing application_name
+            server_settings = {"other_setting": "value"}
 
-                self.adapt_dbapi.connect(
-                    host="localhost", server_settings=server_settings
-                )
+            self.adapt_dbapi.connect(
+                host="localhost", server_settings=server_settings
+            )
 
-                # Check that no application_name was added
-                call_kwargs = self.mock_psqlpy.connect.call_args[1]
-                self.assertNotIn("application_name", call_kwargs)
-                self.assertEqual(call_kwargs["host"], "localhost")
-                self.assertNotIn("server_settings", call_kwargs)
-                self.assertNotIn("other_setting", call_kwargs)
+            # Check that no application_name was added
+            call_kwargs = self.mock_psqlpy.connect.call_args[1]
+            self.assertNotIn("application_name", call_kwargs)
+            self.assertEqual(call_kwargs["host"], "localhost")
+            self.assertNotIn("server_settings", call_kwargs)
+            self.assertNotIn("other_setting", call_kwargs)
 
     def test_connect_without_server_settings(self):
         """Test connect method without server_settings"""
-        with patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"):
-            with patch(
-                "psqlpy_sqlalchemy.dbapi.await_only"
-            ) as mock_await_only:
-                mock_connection = Mock()
-                mock_await_only.return_value = mock_connection
+        with patch(
+            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
+        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+            mock_connection = Mock()
+            mock_await_only.return_value = mock_connection
 
-                self.adapt_dbapi.connect(host="localhost", port=5432)
+            self.adapt_dbapi.connect(host="localhost", port=5432)
 
-                # Verify normal connection without server_settings
-                call_kwargs = self.mock_psqlpy.connect.call_args[1]
-                self.assertEqual(call_kwargs["host"], "localhost")
-                self.assertEqual(call_kwargs["port"], 5432)
-                self.assertNotIn("server_settings", call_kwargs)
+            # Verify normal connection without server_settings
+            call_kwargs = self.mock_psqlpy.connect.call_args[1]
+            self.assertEqual(call_kwargs["host"], "localhost")
+            self.assertEqual(call_kwargs["port"], 5432)
+            self.assertNotIn("server_settings", call_kwargs)
 
     def test_parameter_filtering(self):
         """Test that unsupported parameters are filtered out"""
-        with patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"):
-            with patch(
-                "psqlpy_sqlalchemy.dbapi.await_only"
-            ) as mock_await_only:
-                mock_connection = Mock()
-                mock_await_only.return_value = mock_connection
+        with patch(
+            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
+        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+            mock_connection = Mock()
+            mock_await_only.return_value = mock_connection
 
-                self.adapt_dbapi.connect(
-                    host="localhost",
-                    port=5432,
-                    db_name="testdb",
-                    unsupported_param1="value1",
-                    unsupported_param2="value2",
-                )
+            self.adapt_dbapi.connect(
+                host="localhost",
+                port=5432,
+                db_name="testdb",
+                unsupported_param1="value1",
+                unsupported_param2="value2",
+            )
 
-                # Check that only supported parameters are passed
-                call_kwargs = self.mock_psqlpy.connect.call_args[1]
-                self.assertEqual(call_kwargs["host"], "localhost")
-                self.assertEqual(call_kwargs["port"], 5432)
-                self.assertEqual(call_kwargs["db_name"], "testdb")
-                self.assertNotIn("unsupported_param1", call_kwargs)
-                self.assertNotIn("unsupported_param2", call_kwargs)
+            # Check that only supported parameters are passed
+            call_kwargs = self.mock_psqlpy.connect.call_args[1]
+            self.assertEqual(call_kwargs["host"], "localhost")
+            self.assertEqual(call_kwargs["port"], 5432)
+            self.assertEqual(call_kwargs["db_name"], "testdb")
+            self.assertNotIn("unsupported_param1", call_kwargs)
+            self.assertNotIn("unsupported_param2", call_kwargs)
 
 
 if __name__ == "__main__":

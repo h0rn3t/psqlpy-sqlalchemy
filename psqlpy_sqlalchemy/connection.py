@@ -1,3 +1,4 @@
+import contextlib
 import typing as t
 from collections import deque
 from typing import Any, Optional, Tuple, Union
@@ -39,7 +40,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
     _connection: psqlpy.Connection
 
-    def __init__(self, adapt_connection: AsyncAdapt_dbapi_connection) -> None:
+    def __init__(
+        self, adapt_connection: "AsyncAdapt_psqlpy_connection"
+    ) -> None:
         self._adapt_connection = adapt_connection
         self._connection = adapt_connection._connection
         self._rows: deque[t.Any] = deque()
@@ -177,10 +180,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             return {
                 key: process_value(value) for key, value in parameters.items()
             }
-        elif isinstance(parameters, (list, tuple)):
+        if isinstance(parameters, (list, tuple)):
             return [process_value(value) for value in parameters]
-        else:
-            return process_value(parameters)
+        return process_value(parameters)
 
     def _convert_named_params_with_casting(
         self,
@@ -330,9 +332,21 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             self._process_parameters(params) for params in seq_of_parameters
         ]
 
+        # Convert to the expected type for execute_many
+        converted_seq: t.List[t.List[t.Any]] = []
+        for params in processed_seq:
+            if params is None:
+                converted_seq.append([])
+            elif isinstance(params, dict):
+                converted_seq.append(list(params.values()))
+            elif isinstance(params, (list, tuple)):
+                converted_seq.append(list(params))
+            else:
+                converted_seq.append([params])
+
         return await self._connection.execute_many(
             operation,
-            processed_seq,
+            converted_seq,
             True,
         )
 
@@ -360,7 +374,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
 ):
     """Enhanced server-side cursor with better async iteration support"""
 
-    _cursor: psqlpy.Cursor
+    _cursor: t.Optional[psqlpy.Cursor]
 
     def __init__(
         self, adapt_connection: "AsyncAdapt_psqlpy_connection"
@@ -377,7 +391,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
     ) -> Tuple[Tuple[Any, ...], ...]:
         """Enhanced result conversion with better error handling"""
         if result is None:
-            return tuple()
+            return ()
 
         try:
             return tuple(
@@ -386,7 +400,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
             )
         except Exception:
             # Return empty tuple on conversion error
-            return tuple()
+            return ()
 
     def close(self) -> None:
         """Enhanced close with proper state management"""
@@ -456,6 +470,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
     _ss_cursor_cls = AsyncAdapt_psqlpy_ss_cursor
 
     _connection: psqlpy.Connection
+    _transaction: t.Optional[psqlpy.Transaction]
 
     __slots__ = (
         "_invalidate_schema_cache_asof",
@@ -513,7 +528,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             if self._transaction is not None:
                 await_only(self._transaction.rollback())
             else:
-                await_only(self._connection.rollback())
+                await_only(self._connection.rollback())  # type: ignore[attr-defined]
             self._performance_stats["transactions_rolled_back"] += 1
         except Exception:
             self._performance_stats["connection_errors"] += 1
@@ -530,16 +545,14 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             if self._transaction is not None:
                 await_only(self._transaction.commit())
             else:
-                await_only(self._connection.commit())
+                await_only(self._connection.commit())  # type: ignore[attr-defined]
             self._performance_stats["transactions_committed"] += 1
         except Exception as e:
             self._performance_stats["connection_errors"] += 1
             self._connection_valid = False
             # On commit failure, try to rollback
-            try:
+            with contextlib.suppress(Exception):
                 self.rollback()
-            except Exception:
-                pass
             raise e
         finally:
             self._transaction = None
@@ -549,7 +562,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         """Check if connection is valid"""
         return self._connection_valid and self._connection is not None
 
-    def ping(self) -> bool:
+    def ping(self, reconnect: t.Any = None) -> t.Any:
         """Ping the connection to check if it's alive"""
         import time
 

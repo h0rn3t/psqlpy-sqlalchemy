@@ -38,10 +38,8 @@ class PSQLPyAdaptDBAPI:
 
         # Handle server_settings parameter that SQLAlchemy might pass
         server_settings = kw.pop("server_settings", None)
-        if server_settings:
-            # Map server_settings to individual psqlpy parameters
-            if "application_name" in server_settings:
-                kw["application_name"] = server_settings["application_name"]
+        if server_settings and "application_name" in server_settings:
+            kw["application_name"] = server_settings["application_name"]
             # Add other server_settings mappings as needed
 
         # Filter out any other unsupported parameters that SQLAlchemy might pass

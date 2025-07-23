@@ -325,7 +325,7 @@ class TestAsyncAdaptPsqlpySSCursor(unittest.TestCase):
     def test_convert_result_none(self):
         """Test result conversion with None result"""
         result = self.ss_cursor._convert_result(None)
-        self.assertEqual(result, tuple())
+        self.assertEqual(result, ())
 
     def test_convert_result_success(self):
         """Test successful result conversion"""
@@ -349,7 +349,7 @@ class TestAsyncAdaptPsqlpySSCursor(unittest.TestCase):
 
         result = self.ss_cursor._convert_result(mock_result)
 
-        self.assertEqual(result, tuple())
+        self.assertEqual(result, ())
 
     def test_close(self):
         """Test cursor close method"""
@@ -661,11 +661,11 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         mock_transaction = Mock()
         self.connection._transaction = mock_transaction
         mock_await_only.side_effect = [
-            Exception("Commit error"),
+            RuntimeError("Commit error"),
             None,
         ]  # commit fails, rollback succeeds
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             self.connection.commit()
 
         self.assertFalse(self.connection._connection_valid)
@@ -780,11 +780,11 @@ class TestAsyncAdaptPsqlpyCursorAsync(unittest.TestCase):
 
     async def test_prepare_execute_with_exception(self):
         """Test _prepare_execute with exception"""
-        self.mock_connection.prepare.side_effect = Exception(
+        self.mock_connection.prepare.side_effect = RuntimeError(
             "Connection error"
         )
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             await self.cursor._prepare_execute("SELECT * FROM test")
 
         self.assertIsNone(self.cursor._description)
@@ -862,11 +862,11 @@ class TestAsyncAdaptPsqlpyConnectionAsync(unittest.TestCase):
 
     async def test_start_transaction_with_exception(self):
         """Test transaction start with exception"""
-        self.mock_connection.transaction.side_effect = Exception(
+        self.mock_connection.transaction.side_effect = RuntimeError(
             "Transaction error"
         )
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             await self.connection._start_transaction()
 
         self.assertIsNone(self.connection._transaction)
@@ -911,7 +911,7 @@ class TestAsyncAdaptPsqlpySSCursorCoverage(unittest.TestCase):
         result = self.ss_cursor._convert_result(mock_result)
 
         # Should return empty tuple on exception
-        self.assertEqual(result, tuple())
+        self.assertEqual(result, ())
 
     def test_fetchone_exception(self):
         """Test fetchone with exception"""

@@ -160,11 +160,10 @@ def create_middleware_and_session_proxy():
                         lambda t: asyncio.create_task(cleanup())
                     )
                 return session
-            else:
-                session = _session.get()
-                if session is None:
-                    raise MissingSessionError
-                return session
+            session = _session.get()
+            if session is None:
+                raise MissingSessionError
+            return session
 
     class DBSession(metaclass=DBSessionMeta):
         def __init__(
@@ -338,9 +337,7 @@ class TestCustomFastAPIMiddleware(unittest.TestCase):
         # Test that the session property exists on the class (without accessing it)
         # We check the metaclass has the session property
         self.assertTrue(hasattr(type(DBSession), "session"))
-        self.assertTrue(
-            isinstance(getattr(type(DBSession), "session"), property)
-        )
+        self.assertTrue(isinstance(type(DBSession).session, property))
 
     def test_middleware_with_session_args(self):
         """Test middleware creation with session arguments"""
