@@ -233,6 +233,71 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self.cursor.setinputsizes(10, 20)
 
+    def test_process_parameters_single_value(self):
+        """Test parameter processing with single value (not dict/list)"""
+        test_uuid = uuid.uuid4()
+
+        # Test with UUID
+        result = self.cursor._process_parameters(test_uuid)
+        self.assertEqual(result, test_uuid.bytes)
+
+        # Test with string
+        result = self.cursor._process_parameters("test_string")
+        self.assertEqual(result, "test_string")
+
+    def test_convert_named_params_replacement_failure(self):
+        """Test RuntimeError for failed parameter replacement"""
+        query = "SELECT * FROM test WHERE id = :id"
+        params = {"id": "test"}
+
+        # Create a scenario where replacement fails
+        with patch("re.sub") as mock_sub:
+            mock_sub.return_value = (
+                query  # Return unchanged query to simulate failure
+            )
+
+            with self.assertRaises(RuntimeError) as cm:
+                self.cursor._convert_named_params_with_casting(query, params)
+
+            self.assertIn("Failed to replace parameter", str(cm.exception))
+
+    def test_convert_named_params_remaining_matches(self):
+        """Test RuntimeError for remaining named parameters"""
+        query = "SELECT * FROM test WHERE id = :id"
+        params = {"id": "test"}
+
+        # Mock re.finditer to simulate remaining matches
+        with patch("re.finditer") as mock_finditer:
+            # First call returns matches for initial processing
+            # Second call returns matches for final validation
+            mock_match = Mock()
+            mock_match.group.side_effect = lambda x: "id" if x == 1 else ":id"
+            mock_match.start.return_value = 0
+            mock_finditer.side_effect = [
+                [mock_match],  # Initial matches
+                [mock_match],  # Remaining matches for validation
+            ]
+
+            with patch(
+                "re.sub", return_value="SELECT * FROM test WHERE id = $1"
+            ):
+                with self.assertRaises(RuntimeError) as cm:
+                    self.cursor._convert_named_params_with_casting(
+                        query, params
+                    )
+
+                self.assertIn("Conversion incomplete", str(cm.exception))
+
+    def test_executemany_coverage(self):
+        """Test executemany method for coverage"""
+        operation = "INSERT INTO test VALUES ($1, $2)"
+        seq_of_parameters = [[1, "a"], [2, "b"]]
+
+        # Test the sync wrapper by mocking await_only
+        with patch("psqlpy_sqlalchemy.connection.await_only") as mock_await:
+            self.cursor.executemany(operation, seq_of_parameters)
+            mock_await.assert_called_once()
+
 
 class TestAsyncAdaptPsqlpySSCursor(unittest.TestCase):
     """Test cases for AsyncAdapt_psqlpy_ss_cursor"""
@@ -806,6 +871,130 @@ class TestAsyncAdaptPsqlpyConnectionAsync(unittest.TestCase):
 
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
+
+
+class TestAsyncAdaptPsqlpySSCursorCoverage(unittest.TestCase):
+    """Additional tests for server-side cursor coverage"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_adapt_connection = Mock()
+        self.mock_connection = Mock()
+        self.mock_adapt_connection._connection = self.mock_connection
+        self.mock_adapt_connection.await_ = Mock()
+
+        self.ss_cursor = AsyncAdapt_psqlpy_ss_cursor(
+            self.mock_adapt_connection
+        )
+
+    def test_fetchmany_with_size_none(self):
+        """Test fetchmany when size is None (uses arraysize)"""
+        mock_cursor = Mock()
+        mock_result = Mock()
+        mock_result.row_factory = lambda x: [[("col1", "value1")]]
+
+        self.ss_cursor._cursor = mock_cursor
+        self.ss_cursor.arraysize = 5
+        self.mock_adapt_connection.await_.return_value = mock_result
+
+        result = self.ss_cursor.fetchmany(size=None)
+
+        # Should use arraysize when size is None
+        mock_cursor.fetchmany.assert_called_with(size=5)
+        self.assertEqual(result, [("value1",)])
+
+    def test_convert_result_exception(self):
+        """Test _convert_result with exception"""
+        mock_result = Mock()
+        mock_result.row_factory.side_effect = Exception("Conversion error")
+
+        result = self.ss_cursor._convert_result(mock_result)
+
+        # Should return empty tuple on exception
+        self.assertEqual(result, tuple())
+
+    def test_fetchone_exception(self):
+        """Test fetchone with exception"""
+        mock_cursor = Mock()
+        self.ss_cursor._cursor = mock_cursor
+        self.mock_adapt_connection.await_.side_effect = Exception(
+            "Fetch error"
+        )
+
+        result = self.ss_cursor.fetchone()
+
+        # Should return None on exception
+        self.assertIsNone(result)
+
+    def test_fetchmany_exception(self):
+        """Test fetchmany with exception"""
+        mock_cursor = Mock()
+        self.ss_cursor._cursor = mock_cursor
+        self.mock_adapt_connection.await_.side_effect = Exception(
+            "Fetch error"
+        )
+
+        result = self.ss_cursor.fetchmany()
+
+        # Should return empty list on exception
+        self.assertEqual(result, [])
+
+    def test_fetchall_exception(self):
+        """Test fetchall with exception"""
+        mock_cursor = Mock()
+        self.ss_cursor._cursor = mock_cursor
+        self.mock_adapt_connection.await_.side_effect = Exception(
+            "Fetch error"
+        )
+
+        result = self.ss_cursor.fetchall()
+
+        # Should return empty list on exception
+        self.assertEqual(result, [])
+
+
+class TestAsyncAdaptPsqlpyConnectionCoverage(unittest.TestCase):
+    """Additional tests for connection coverage"""
+
+    def setUp(self):
+        """Set up test fixtures"""
+        self.mock_dbapi = Mock()
+        self.mock_connection = Mock()
+        self.connection = AsyncAdapt_psqlpy_connection(
+            self.mock_dbapi, self.mock_connection
+        )
+
+    def test_ping_recent(self):
+        """Test ping when recently pinged (within 30 seconds)"""
+        import time
+
+        # Set last ping time to recent
+        self.connection._last_ping_time = time.time() - 10  # 10 seconds ago
+        self.connection._connection_valid = True
+
+        result = self.connection.ping()
+
+        # Should return cached result without executing query
+        self.assertTrue(result)
+        self.mock_connection.execute.assert_not_called()
+
+    def test_ping_exception(self):
+        """Test ping with exception"""
+        import time
+
+        # Set last ping time to old
+        self.connection._last_ping_time = time.time() - 60  # 60 seconds ago
+
+        with patch("psqlpy_sqlalchemy.connection.await_only") as mock_await:
+            mock_await.side_effect = Exception("Connection error")
+
+            result = self.connection.ping()
+
+            self.assertFalse(result)
+            self.assertFalse(self.connection._connection_valid)
+            self.assertEqual(
+                self.connection._performance_stats["connection_errors"], 1
+            )
 
 
 if __name__ == "__main__":

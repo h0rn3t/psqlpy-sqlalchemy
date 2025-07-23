@@ -614,6 +614,22 @@ class TestUUIDBindProcessor(unittest.TestCase):
 
         self.assertIn("Cannot convert", str(cm.exception))
 
+    def test_uuid_bind_processor_with_non_string_convertible(self):
+        """Test UUID bind processor with non-string value that can be converted"""
+        import uuid
+
+        processor = self.uuid_type.bind_processor(self.dialect)
+        test_uuid = uuid.uuid4()
+
+        # Test with a custom object that has __str__ method
+        class CustomUUID:
+            def __str__(self):
+                return str(test_uuid)
+
+        custom_obj = CustomUUID()
+        result = processor(custom_obj)
+        self.assertEqual(result, test_uuid.bytes)
+
 
 class TestDialectMethods(unittest.TestCase):
     """Test cases for additional dialect methods"""
@@ -678,6 +694,106 @@ class TestDialectMethods(unittest.TestCase):
             "show transaction isolation level"
         )
         mock_cursor.fetchone.assert_called_once()
+
+    def test_isolation_lookup_property(self):
+        """Test _isolation_lookup property"""
+        import psqlpy
+
+        isolation_lookup = self.dialect._isolation_lookup
+
+        # Test that the property returns the expected mapping
+        self.assertIn("READ_COMMITTED", isolation_lookup)
+        self.assertIn("REPEATABLE_READ", isolation_lookup)
+        self.assertIn("SERIALIZABLE", isolation_lookup)
+
+        # Test that values are psqlpy isolation levels
+        self.assertEqual(
+            isolation_lookup["READ_COMMITTED"],
+            psqlpy.IsolationLevel.ReadCommitted,
+        )
+        self.assertEqual(
+            isolation_lookup["REPEATABLE_READ"],
+            psqlpy.IsolationLevel.RepeatableRead,
+        )
+        self.assertEqual(
+            isolation_lookup["SERIALIZABLE"],
+            psqlpy.IsolationLevel.Serializable,
+        )
+
+    def test_set_isolation_level(self):
+        """Test set_isolation_level method"""
+        from unittest.mock import Mock
+
+        mock_connection = Mock()
+
+        # Test setting isolation level
+        self.dialect.set_isolation_level(mock_connection, "READ_COMMITTED")
+
+        # Should call set_isolation_level on the connection
+        mock_connection.set_isolation_level.assert_called_once()
+
+    def test_set_readonly_true(self):
+        """Test set_readonly method with True"""
+        from unittest.mock import Mock
+
+        import psqlpy
+
+        mock_connection = Mock()
+
+        self.dialect.set_readonly(mock_connection, True)
+
+        # Should set readonly to ReadOnly
+        self.assertEqual(mock_connection.readonly, psqlpy.ReadVariant.ReadOnly)
+
+    def test_set_readonly_false(self):
+        """Test set_readonly method with False"""
+        from unittest.mock import Mock
+
+        import psqlpy
+
+        mock_connection = Mock()
+
+        self.dialect.set_readonly(mock_connection, False)
+
+        # Should set readonly to ReadWrite
+        self.assertEqual(
+            mock_connection.readonly, psqlpy.ReadVariant.ReadWrite
+        )
+
+    def test_get_readonly(self):
+        """Test get_readonly method"""
+        from unittest.mock import Mock
+
+        mock_connection = Mock()
+        mock_connection.readonly = "test_readonly_value"
+
+        result = self.dialect.get_readonly(mock_connection)
+
+        # Should return the readonly value from connection
+        self.assertEqual(result, "test_readonly_value")
+
+    def test_set_deferrable(self):
+        """Test set_deferrable method"""
+        from unittest.mock import Mock
+
+        mock_connection = Mock()
+
+        self.dialect.set_deferrable(mock_connection, True)
+
+        # Should set deferrable on the connection
+        self.assertEqual(mock_connection.deferrable, True)
+
+    def test_get_deferrable(self):
+        """Test get_deferrable method"""
+        from unittest.mock import Mock
+
+        mock_connection = Mock()
+        mock_connection.deferrable = "test_deferrable_value"
+
+        result = self.dialect.get_deferrable(mock_connection)
+
+        # Should return the deferrable value from connection
+        self.assertEqual(result, "test_deferrable_value")
 
 
 if __name__ == "__main__":
