@@ -90,16 +90,6 @@ jobs:
     - name: Run tests without PostgreSQL
       run: python -m pytest tests/ -v
 
-#    - name: Run pytest
-#      run:  python -m pytest tests/ -v
-#
-#    - name: Run tests and collect coverage
-#      run: pytest --cov .
-#
-#    - name: Upload coverage reports to Codecov
-#      uses: codecov/codecov-action@v5
-#      with:
-#        token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     name: lint
