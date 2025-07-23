@@ -1,10 +1,12 @@
+import typing as t
+
 from sqlalchemy.util.concurrency import await_only
 
 from .connection import AsyncAdapt_psqlpy_connection
 
 
 class PSQLPyAdaptDBAPI:
-    def __init__(self, psqlpy) -> None:
+    def __init__(self, psqlpy: t.Any) -> None:
         self.psqlpy = psqlpy
         self.paramstyle = "numeric_dollar"
 
@@ -29,7 +31,9 @@ class PSQLPyAdaptDBAPI:
             if k != "connect":
                 self.__dict__[k] = v
 
-    def connect(self, *arg, **kw):
+    def connect(
+        self, *arg: t.Any, **kw: t.Any
+    ) -> AsyncAdapt_psqlpy_connection:
         creator_fn = kw.pop("async_creator_fn", self.psqlpy.connect)
 
         # Handle server_settings parameter that SQLAlchemy might pass
@@ -88,7 +92,7 @@ class PsqlpyDBAPI:
         "numeric_dollar"  # PostgreSQL uses $1, $2, etc. style parameters
     )
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Initialize with psqlpy module
         import psqlpy
 
@@ -108,44 +112,52 @@ class PsqlpyDBAPI:
         self.NotSupportedError = _error_class
 
     # Type constructors
-    def Date(self, year, month, day):
+    def Date(self, year: int, month: int, day: int) -> t.Any:
         """Construct a date value"""
         import datetime
 
         return datetime.date(year, month, day)
 
-    def Time(self, hour, minute, second):
+    def Time(self, hour: int, minute: int, second: int) -> t.Any:
         """Construct a time value"""
         import datetime
 
         return datetime.time(hour, minute, second)
 
-    def Timestamp(self, year, month, day, hour, minute, second):
+    def Timestamp(
+        self,
+        year: int,
+        month: int,
+        day: int,
+        hour: int,
+        minute: int,
+        second: int,
+    ) -> t.Any:
         """Construct a timestamp value"""
         import datetime
 
         return datetime.datetime(year, month, day, hour, minute, second)
 
-    def DateFromTicks(self, ticks):
+    def DateFromTicks(self, ticks: float) -> t.Any:
         """Construct a date from ticks"""
         import datetime
 
         return datetime.date.fromtimestamp(ticks)
 
-    def TimeFromTicks(self, ticks):
+    def TimeFromTicks(self, ticks: float) -> t.Any:
         """Construct a time from ticks"""
         import datetime
 
         dt = datetime.datetime.fromtimestamp(ticks)
         return dt.time()
 
-    def TimestampFromTicks(self, ticks):
+    def TimestampFromTicks(self, ticks: float) -> t.Any:
         """Construct a timestamp from ticks"""
         import datetime
 
         return datetime.datetime.fromtimestamp(ticks)
 
-    def Binary(self, string):
+    def Binary(self, string: t.Union[str, bytes]) -> bytes:
         """Construct a binary value"""
         if isinstance(string, str):
             return string.encode("utf-8")
@@ -158,6 +170,8 @@ class PsqlpyDBAPI:
     DATETIME = object  # datetime objects
     ROWID = int
 
-    def connect(self, *args, **kwargs):
+    def connect(
+        self, *args: t.Any, **kwargs: t.Any
+    ) -> AsyncAdapt_psqlpy_connection:
         """Create a connection - delegates to the adapted DBAPI"""
         return self._adapt_dbapi.connect(*args, **kwargs)

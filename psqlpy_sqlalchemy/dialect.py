@@ -24,7 +24,13 @@ class CompatibleNullPool(NullPool):
     but are commonly passed by frameworks like FastAPI with fastapi_async_sqlalchemy.
     """
 
-    def __init__(self, creator, pool_size=None, max_overflow=None, **kw):
+    def __init__(
+        self,
+        creator: t.Any,
+        pool_size: t.Optional[int] = None,
+        max_overflow: t.Optional[int] = None,
+        **kw: t.Any,
+    ) -> None:
         # Filter out pool sizing arguments that NullPool doesn't accept
         filtered_kw = {
             k: v
@@ -140,43 +146,43 @@ class _PGJSONB(sqltypes.JSON):
     class Comparator(sqltypes.JSON.Comparator):
         """Enhanced comparator with JSONB-specific operators"""
 
-        def contains(self, other):
+        def contains(self, other: t.Any) -> t.Any:
             """JSONB containment operator @>"""
             return self.operate(operators.custom_op("@>"), other)
 
-        def contained_by(self, other):
+        def contained_by(self, other: t.Any) -> t.Any:
             """JSONB contained by operator <@"""
             return self.operate(operators.custom_op("<@"), other)
 
-        def has_key(self, key):
+        def has_key(self, key: t.Any) -> t.Any:
             """JSONB has key operator ?"""
             return self.operate(operators.custom_op("?"), key)
 
-        def has_any_key(self, keys):
+        def has_any_key(self, keys: t.Any) -> t.Any:
             """JSONB has any key operator ?|"""
             return self.operate(operators.custom_op("?|"), keys)
 
-        def has_all_keys(self, keys):
+        def has_all_keys(self, keys: t.Any) -> t.Any:
             """JSONB has all keys operator ?&"""
             return self.operate(operators.custom_op("?&"), keys)
 
-        def path_exists(self, path):
+        def path_exists(self, path: t.Any) -> t.Any:
             """JSONB path exists operator @?"""
             return self.operate(operators.custom_op("@?"), path)
 
-        def path_match(self, path):
+        def path_match(self, path: t.Any) -> t.Any:
             """JSONB path match operator @@"""
             return self.operate(operators.custom_op("@@"), path)
 
-        def concat(self, other):
+        def concat(self, other: t.Any) -> t.Any:
             """JSONB concatenation operator ||"""
             return self.operate(operators.custom_op("||"), other)
 
-        def delete_key(self, key):
+        def delete_key(self, key: t.Any) -> t.Any:
             """JSONB delete key operator -"""
             return self.operate(operators.custom_op("-"), key)
 
-        def delete_path(self, path):
+        def delete_path(self, path: t.Any) -> t.Any:
             """JSONB delete path operator #-"""
             return self.operate(operators.custom_op("#-"), path)
 
@@ -222,10 +228,12 @@ class _PGNullType(sqltypes.NullType):
 class _PGUUID(UUID):
     """PostgreSQL UUID type with proper parameter binding for psqlpy."""
 
-    def bind_processor(self, dialect):
+    def bind_processor(
+        self, dialect: t.Any
+    ) -> t.Optional[t.Callable[[t.Any], t.Any]]:
         """Process UUID parameters for psqlpy compatibility."""
 
-        def process(value):
+        def process(value: t.Any) -> t.Optional[bytes]:
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
@@ -332,23 +340,23 @@ class PSQLPyAsyncDialect(PGDialect):
     def set_isolation_level(
         self,
         dbapi_connection: AsyncAdapt_psqlpy_connection,
-        level,
-    ):
+        level: t.Any,
+    ) -> None:
         dbapi_connection.set_isolation_level(self._isolation_lookup[level])
 
-    def set_readonly(self, connection, value):
+    def set_readonly(self, connection: t.Any, value: t.Any) -> None:
         if value is True:
             connection.readonly = psqlpy.ReadVariant.ReadOnly
         else:
             connection.readonly = psqlpy.ReadVariant.ReadWrite
 
-    def get_readonly(self, connection):
+    def get_readonly(self, connection: t.Any) -> t.Any:
         return connection.readonly
 
-    def set_deferrable(self, connection, value):
+    def set_deferrable(self, connection: t.Any, value: t.Any) -> None:
         connection.deferrable = value
 
-    def get_deferrable(self, connection):
+    def get_deferrable(self, connection: t.Any) -> t.Any:
         return connection.deferrable
 
 

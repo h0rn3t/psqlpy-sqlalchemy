@@ -1,6 +1,6 @@
 import typing as t
 from collections import deque
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Union
 
 import psqlpy
 from psqlpy import row_factories
@@ -26,19 +26,23 @@ class PGExecutionContext_psqlpy(PGExecutionContext):
 
 class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     __slots__ = (
+        "_adapt_connection",
         "_arraysize",
+        "_connection",
+        "_cursor",
         "_description",
         "_invalidate_schema_cache_asof",
         "_rowcount",
+        "_rows",
     )
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
     _connection: psqlpy.Connection
 
-    def __init__(self, adapt_connection: AsyncAdapt_dbapi_connection):
+    def __init__(self, adapt_connection: AsyncAdapt_dbapi_connection) -> None:
         self._adapt_connection = adapt_connection
         self._connection = adapt_connection._connection
-        self._rows = deque()
+        self._rows: deque[t.Any] = deque()
         self._description: t.Optional[t.List[t.Tuple[t.Any, ...]]] = None
         self._arraysize = 1
         self._rowcount = -1
@@ -155,7 +159,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         import uuid
 
-        def process_value(value):
+        def process_value(value: Any) -> Any:
             """Process a single parameter value."""
             if value is None:
                 return None
@@ -341,10 +345,12 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     ) -> None:
         await_only(self._prepare_execute(operation, parameters))
 
-    def executemany(self, operation, seq_of_parameters) -> None:
+    def executemany(
+        self, operation: t.Any, seq_of_parameters: t.Sequence[t.Any]
+    ) -> None:
         return await_only(self._executemany(operation, seq_of_parameters))
 
-    def setinputsizes(self, *inputsizes):
+    def setinputsizes(self, *inputsizes: t.Any) -> None:
         raise NotImplementedError
 
 
@@ -356,7 +362,9 @@ class AsyncAdapt_psqlpy_ss_cursor(
 
     _cursor: psqlpy.Cursor
 
-    def __init__(self, adapt_connection):
+    def __init__(
+        self, adapt_connection: "AsyncAdapt_psqlpy_connection"
+    ) -> None:
         self._adapt_connection = adapt_connection
         self._connection = adapt_connection._connection
         self.await_ = adapt_connection.await_
@@ -380,7 +388,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
             # Return empty tuple on conversion error
             return tuple()
 
-    def close(self):
+    def close(self) -> None:
         """Enhanced close with proper state management"""
         if self._cursor is not None and not self._closed:
             try:
@@ -392,7 +400,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
                 self._cursor = None
                 self._closed = True
 
-    def fetchone(self):
+    def fetchone(self) -> Optional[Tuple[Any, ...]]:
         """Fetch one row with enhanced error handling"""
         if self._closed or self._cursor is None:
             return None
@@ -404,7 +412,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return None
 
-    def fetchmany(self, size=None):
+    def fetchmany(self, size: Optional[int] = None) -> t.List[Tuple[Any, ...]]:
         """Fetch many rows with enhanced error handling"""
         if self._closed or self._cursor is None:
             return []
@@ -417,7 +425,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return []
 
-    def fetchall(self):
+    def fetchall(self) -> t.List[Tuple[Any, ...]]:
         """Fetch all rows with enhanced error handling"""
         if self._closed or self._cursor is None:
             return []
@@ -428,7 +436,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return []
 
-    def __iter__(self):
+    def __iter__(self) -> t.Iterator[Tuple[Any, ...]]:
         if self._closed or self._cursor is None:
             return
 
@@ -464,7 +472,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "readonly",
     )
 
-    def __init__(self, dbapi, connection):
+    def __init__(self, dbapi: t.Any, connection: psqlpy.Connection) -> None:
         super().__init__(dbapi, connection)
         self.isolation_level = self._isolation_setting = None
         self.readonly = False
@@ -472,7 +480,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._transaction = None
         self._started = False
         self._connection_valid = True
-        self._last_ping_time = 0
+        self._last_ping_time = 0.0
         self._performance_stats = {
             "queries_executed": 0,
             "transactions_committed": 0,
@@ -496,7 +504,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             self._started = False
             raise
 
-    def set_isolation_level(self, level):
+    def set_isolation_level(self, level: t.Any) -> None:
         self.isolation_level = self._isolation_setting = level
 
     def rollback(self) -> None:
@@ -561,7 +569,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             self._performance_stats["connection_errors"] += 1
             return False
 
-    def get_performance_stats(self) -> dict:
+    def get_performance_stats(self) -> t.Dict[str, int]:
         """Get connection performance statistics"""
         return self._performance_stats.copy()
 
@@ -574,11 +582,13 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             "connection_errors": 0,
         }
 
-    def close(self):
+    def close(self) -> None:
         self.rollback()
         self._connection.close()
 
-    def cursor(self, server_side=False):
+    def cursor(
+        self, server_side: bool = False
+    ) -> Union[AsyncAdapt_psqlpy_cursor, AsyncAdapt_psqlpy_ss_cursor]:
         if server_side:
             return self._ss_cursor_cls(self)
         return self._cursor_cls(self)
