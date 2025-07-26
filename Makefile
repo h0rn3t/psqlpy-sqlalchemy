@@ -1,4 +1,4 @@
-.PHONY: help docker-up docker-down docker-logs test test-db test-no-db clean install lint format
+.PHONY: help docker-up docker-down docker-logs test test-db test-no-db clean install lint format benchmark
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -81,3 +81,30 @@ dev-setup: install docker-up ## Complete development setup
 	@echo "Development environment is ready!"
 	@echo "Run 'make test' to run tests with PostgreSQL"
 	@echo "Run 'make docker-down' to stop PostgreSQL when done"
+
+benchmark: ## Run performance comparison between psqlpy-sqlalchemy and asyncpg
+	@echo "🚀 Starting performance benchmark..."
+	@echo "Checking if PostgreSQL is available..."
+	@if ! docker exec psqlpy-postgres pg_isready -U postgres >/dev/null 2>&1; then \
+		echo "PostgreSQL not running, starting Docker container..."; \
+		$(MAKE) docker-up; \
+		DOCKER_STARTED=1; \
+	else \
+		echo "PostgreSQL is already running"; \
+		DOCKER_STARTED=0; \
+	fi; \
+	echo "Ensuring dependencies are installed..."; \
+	pip install -e ".[dev]" >/dev/null 2>&1 || echo "Dependencies already installed"; \
+	echo "Running performance comparison test..."; \
+	python performance_comparison.py; \
+	BENCHMARK_EXIT_CODE=$$?; \
+	if [ "$$DOCKER_STARTED" = "1" ]; then \
+		echo "Stopping Docker container that was started for benchmark..."; \
+		$(MAKE) docker-down; \
+	fi; \
+	if [ $$BENCHMARK_EXIT_CODE -eq 0 ]; then \
+		echo "✅ Benchmark completed successfully!"; \
+	else \
+		echo "❌ Benchmark failed with exit code $$BENCHMARK_EXIT_CODE"; \
+	fi; \
+	exit $$BENCHMARK_EXIT_CODE

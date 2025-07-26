@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psqlpy-sqlalchemy"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "SQLAlchemy dialect for psqlpy PostgreSQL driver"
 readme = "README.md"
 license = {text = "MIT"}
@@ -44,6 +44,7 @@ dev = [
     "fastapi>=0.68.0",
     "starlette>=0.14.0",
     "fastapi-async-sqlalchemy>=0.3.0",
+    "asyncpg>=0.28.0",
 ]
 fastapi = [
     "fastapi>=0.68.0",

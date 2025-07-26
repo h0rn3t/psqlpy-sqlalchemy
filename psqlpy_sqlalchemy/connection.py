@@ -350,19 +350,19 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             True,
         )
 
-    def execute(
+    async def execute(
         self,
         operation: t.Any,
         parameters: t.Union[
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> None:
-        await_only(self._prepare_execute(operation, parameters))
+        await self._prepare_execute(operation, parameters)
 
-    def executemany(
+    async def executemany(
         self, operation: t.Any, seq_of_parameters: t.Sequence[t.Any]
     ) -> None:
-        return await_only(self._executemany(operation, seq_of_parameters))
+        await self._executemany(operation, seq_of_parameters)
 
     def setinputsizes(self, *inputsizes: t.Any) -> None:
         raise NotImplementedError

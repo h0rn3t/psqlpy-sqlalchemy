@@ -211,6 +211,29 @@ with engine.connect() as conn:
     print("Connection successful:", result.fetchone())
 ```
 
+### Performance Benchmarking
+
+The project includes a comprehensive performance comparison test between psqlpy-sqlalchemy and asyncpg:
+
+```bash
+# Run performance benchmark (recommended)
+make benchmark
+```
+
+This command will:
+- Automatically start PostgreSQL if not running
+- Install required dependencies
+- Run performance comparison tests across multiple scenarios
+- Clean up resources after completion
+
+The benchmark tests various operations including:
+- Simple SELECT queries
+- Single and bulk INSERT operations
+- Complex queries with aggregations
+- Concurrent operations
+
+For detailed benchmark configuration and results interpretation, see [PERFORMANCE_TEST_README.md](PERFORMANCE_TEST_README.md).
+
 ## Architecture
 
 The dialect consists of several key components:

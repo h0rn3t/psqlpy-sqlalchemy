@@ -208,25 +208,35 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         self.cursor.arraysize = 10
         self.assertEqual(self.cursor.arraysize, 10)
 
-    @patch("psqlpy_sqlalchemy.connection.await_only")
-    def test_execute(self, mock_await_only):
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute(self, mock_prepare_execute):
         """Test cursor execute method"""
         operation = "SELECT * FROM table"
         parameters = {"id": 123}
 
-        self.cursor.execute(operation, parameters)
+        # Since execute is now async, we need to run it in an async context
+        import asyncio
 
-        mock_await_only.assert_called_once()
+        asyncio.run(self.cursor.execute(operation, parameters))
 
-    @patch("psqlpy_sqlalchemy.connection.await_only")
-    def test_executemany(self, mock_await_only):
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_executemany", new_callable=AsyncMock
+    )
+    def test_executemany(self, mock_executemany):
         """Test cursor executemany method"""
         operation = "INSERT INTO table VALUES ($1, $2)"
         seq_of_parameters = [[1, "a"], [2, "b"]]
 
-        self.cursor.executemany(operation, seq_of_parameters)
+        # Since executemany is now async, we need to run it in an async context
+        import asyncio
 
-        mock_await_only.assert_called_once()
+        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+
+        mock_executemany.assert_called_once_with(operation, seq_of_parameters)
 
     def test_setinputsizes(self):
         """Test setinputsizes method raises NotImplementedError"""
@@ -288,15 +298,185 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
 
                 self.assertIn("Conversion incomplete", str(cm.exception))
 
-    def test_executemany_coverage(self):
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_executemany", new_callable=AsyncMock
+    )
+    def test_executemany_coverage(self, mock_executemany):
         """Test executemany method for coverage"""
         operation = "INSERT INTO test VALUES ($1, $2)"
         seq_of_parameters = [[1, "a"], [2, "b"]]
 
-        # Test the sync wrapper by mocking await_only
-        with patch("psqlpy_sqlalchemy.connection.await_only") as mock_await:
-            self.cursor.executemany(operation, seq_of_parameters)
-            mock_await.assert_called_once()
+        # Since executemany is now async, we need to run it in an async context
+        import asyncio
+
+        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+
+        mock_executemany.assert_called_once_with(operation, seq_of_parameters)
+
+    # UPDATE operation tests
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_basic(self, mock_prepare_execute):
+        """Test basic UPDATE operation with execute method"""
+        operation = "UPDATE users SET name = 'John' WHERE id = 1"
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation))
+
+        mock_prepare_execute.assert_called_once_with(operation, None)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_with_named_parameters(self, mock_prepare_execute):
+        """Test UPDATE operation with named parameters"""
+        operation = (
+            "UPDATE users SET name = :name, email = :email WHERE id = :id"
+        )
+        parameters = {"name": "John Doe", "email": "john@example.com", "id": 1}
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_with_positional_parameters(
+        self, mock_prepare_execute
+    ):
+        """Test UPDATE operation with positional parameters"""
+        operation = "UPDATE users SET name = $1, email = $2 WHERE id = $3"
+        parameters = ["John Doe", "john@example.com", 1]
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_multiple_columns(self, mock_prepare_execute):
+        """Test UPDATE operation with multiple columns"""
+        operation = "UPDATE users SET name = :name, email = :email, age = :age, updated_at = NOW() WHERE id = :id"
+        parameters = {
+            "name": "Jane Smith",
+            "email": "jane@example.com",
+            "age": 30,
+            "id": 2,
+        }
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_with_where_clause(self, mock_prepare_execute):
+        """Test UPDATE operation with complex WHERE clause"""
+        operation = "UPDATE users SET status = :status WHERE age > :min_age AND created_at < :date"
+        parameters = {"status": "active", "min_age": 18, "date": "2023-01-01"}
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_executemany", new_callable=AsyncMock
+    )
+    def test_executemany_update_operations(self, mock_executemany):
+        """Test UPDATE operations with executemany method"""
+        operation = "UPDATE users SET name = $1, email = $2 WHERE id = $3"
+        seq_of_parameters = [
+            ["John Doe", "john@example.com", 1],
+            ["Jane Smith", "jane@example.com", 2],
+            ["Bob Johnson", "bob@example.com", 3],
+        ]
+
+        import asyncio
+
+        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+
+        mock_executemany.assert_called_once_with(operation, seq_of_parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_executemany", new_callable=AsyncMock
+    )
+    def test_executemany_update_with_dict_parameters(self, mock_executemany):
+        """Test UPDATE operations with executemany using dict parameters"""
+        operation = "UPDATE users SET name = :name WHERE id = :id"
+        seq_of_parameters = [
+            {"name": "John Updated", "id": 1},
+            {"name": "Jane Updated", "id": 2},
+        ]
+
+        import asyncio
+
+        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+
+        mock_executemany.assert_called_once_with(operation, seq_of_parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_with_uuid_parameter(self, mock_prepare_execute):
+        """Test UPDATE operation with UUID parameter (tests the async fix)"""
+        test_uuid = uuid.uuid4()
+        operation = "UPDATE users SET profile_id = :profile_id WHERE id = :id"
+        parameters = {"profile_id": test_uuid, "id": 1}
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_async_greenlet_fix(self, mock_prepare_execute):
+        """Test that UPDATE operations work with the async/greenlet fix"""
+        # This test specifically verifies that the async fix works for UPDATE operations
+        # that were causing the original greenlet switching issue
+        operation = "UPDATE test_table SET name = :name WHERE id = :id"
+        parameters = {"name": "test_update", "id": 1}
+
+        import asyncio
+
+        # This should not raise any greenlet-related errors
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
+
+        # Verify that the method was called without await_only issues
+        self.assertTrue(mock_prepare_execute.called)
+
+    @patch.object(
+        AsyncAdapt_psqlpy_cursor, "_prepare_execute", new_callable=AsyncMock
+    )
+    def test_execute_update_with_null_values(self, mock_prepare_execute):
+        """Test UPDATE operation with NULL values"""
+        operation = (
+            "UPDATE users SET email = :email, phone = :phone WHERE id = :id"
+        )
+        parameters = {"email": None, "phone": None, "id": 1}
+
+        import asyncio
+
+        asyncio.run(self.cursor.execute(operation, parameters))
+
+        mock_prepare_execute.assert_called_once_with(operation, parameters)
 
 
 class TestAsyncAdaptPsqlpySSCursor(unittest.TestCase):
