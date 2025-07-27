@@ -51,6 +51,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
             "connection_errors": 0,
         }
         self.mock_adapt_connection._connection_valid = True
+        self.mock_adapt_connection.await_ = Mock()
 
         self.cursor = AsyncAdapt_psqlpy_cursor(self.mock_adapt_connection)
 
@@ -216,10 +217,8 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "SELECT * FROM table"
         parameters = {"id": 123}
 
-        # Since execute is now async, we need to run it in an async context
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        # Execute is now synchronous and uses await_ internally
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -231,10 +230,8 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "INSERT INTO table VALUES ($1, $2)"
         seq_of_parameters = [[1, "a"], [2, "b"]]
 
-        # Since executemany is now async, we need to run it in an async context
-        import asyncio
-
-        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+        # Executemany is now synchronous and uses await_ internally
+        self.cursor.executemany(operation, seq_of_parameters)
 
         mock_executemany.assert_called_once_with(operation, seq_of_parameters)
 
@@ -306,10 +303,8 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "INSERT INTO test VALUES ($1, $2)"
         seq_of_parameters = [[1, "a"], [2, "b"]]
 
-        # Since executemany is now async, we need to run it in an async context
-        import asyncio
-
-        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+        # Executemany is now synchronous and uses await_ internally
+        self.cursor.executemany(operation, seq_of_parameters)
 
         mock_executemany.assert_called_once_with(operation, seq_of_parameters)
 
@@ -321,9 +316,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         """Test basic UPDATE operation with execute method"""
         operation = "UPDATE users SET name = 'John' WHERE id = 1"
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation))
+        self.cursor.execute(operation)
 
         mock_prepare_execute.assert_called_once_with(operation, None)
 
@@ -337,9 +330,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         )
         parameters = {"name": "John Doe", "email": "john@example.com", "id": 1}
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -353,9 +344,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "UPDATE users SET name = $1, email = $2 WHERE id = $3"
         parameters = ["John Doe", "john@example.com", 1]
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -372,9 +361,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
             "id": 2,
         }
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -386,9 +373,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "UPDATE users SET status = :status WHERE age > :min_age AND created_at < :date"
         parameters = {"status": "active", "min_age": 18, "date": "2023-01-01"}
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -404,9 +389,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
             ["Bob Johnson", "bob@example.com", 3],
         ]
 
-        import asyncio
-
-        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+        self.cursor.executemany(operation, seq_of_parameters)
 
         mock_executemany.assert_called_once_with(operation, seq_of_parameters)
 
@@ -421,9 +404,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
             {"name": "Jane Updated", "id": 2},
         ]
 
-        import asyncio
-
-        asyncio.run(self.cursor.executemany(operation, seq_of_parameters))
+        self.cursor.executemany(operation, seq_of_parameters)
 
         mock_executemany.assert_called_once_with(operation, seq_of_parameters)
 
@@ -436,9 +417,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "UPDATE users SET profile_id = :profile_id WHERE id = :id"
         parameters = {"profile_id": test_uuid, "id": 1}
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -455,7 +434,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         import asyncio
 
         # This should not raise any greenlet-related errors
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
@@ -472,9 +451,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         )
         parameters = {"email": None, "phone": None, "id": 1}
 
-        import asyncio
-
-        asyncio.run(self.cursor.execute(operation, parameters))
+        self.cursor.execute(operation, parameters)
 
         mock_prepare_execute.assert_called_once_with(operation, parameters)
 
