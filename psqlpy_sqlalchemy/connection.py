@@ -35,6 +35,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         "_invalidate_schema_cache_asof",
         "_rowcount",
         "_rows",
+        "await_",
     )
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"

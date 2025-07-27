@@ -431,8 +431,6 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         operation = "UPDATE test_table SET name = :name WHERE id = :id"
         parameters = {"name": "test_update", "id": 1}
 
-        import asyncio
-
         # This should not raise any greenlet-related errors
         self.cursor.execute(operation, parameters)
 
