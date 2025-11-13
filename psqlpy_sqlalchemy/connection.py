@@ -1,6 +1,8 @@
 import contextlib
+import re
 import typing as t
 from collections import deque
+from functools import lru_cache
 from typing import Any, Optional, Tuple, Union
 
 import psqlpy
@@ -12,6 +14,17 @@ from sqlalchemy.connectors.asyncio import (
 )
 from sqlalchemy.dialects.postgresql.base import PGExecutionContext
 from sqlalchemy.util.concurrency import await_only
+
+# Pre-compile regex patterns for performance
+_PARAM_PATTERN = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?")
+_CASTING_PATTERN = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)::")
+_POSITIONAL_CHECK = re.compile(r"\$\d+:$")
+
+# UUID pattern for fast validation
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE
+)
 
 if t.TYPE_CHECKING:
     from sqlalchemy.engine.interfaces import (
@@ -60,13 +73,12 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> None:
-        """Enhanced prepared statement execution with better error handling"""
+        """Enhanced prepared statement execution with better error handling and optimization"""
 
-        if (
-            not self._adapt_connection._started
-            and self._adapt_connection._transaction is None
-        ):
-            await self._adapt_connection._start_transaction()
+        # Optimized transaction check - single condition
+        adapt_conn = self._adapt_connection
+        if not adapt_conn._started:
+            await adapt_conn._start_transaction()
 
         # Process parameters to ensure proper type conversion (especially for UUIDs)
         processed_parameters = self._process_parameters(parameters)
@@ -133,12 +145,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
             results = await prepared_stmt.execute()
 
-            rows: Tuple[Tuple[Any, ...], ...] = tuple(
+            # Optimized: direct iteration without intermediate tuple creation
+            rows_list = [
                 tuple(value for _, value in row)
                 for row in results.row_factory(row_factories.tuple_row)
-            )
-            self._rows = deque(rows)
-            self._rowcount = len(rows) if rows else 0
+            ]
+            self._rows = deque(rows_list)
+            self._rowcount = len(rows_list)
 
             # Track query execution statistics
             self._adapt_connection._performance_stats["queries_executed"] += 1
@@ -158,23 +171,28 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]:
-        """Process parameters to ensure proper type conversion for psqlpy."""
+        """Process parameters to ensure proper type conversion for psqlpy.
+
+        Optimized version that avoids unnecessary UUID parsing attempts.
+        """
         if parameters is None:
             return None
 
         import uuid
 
         def process_value(value: Any) -> Any:
-            """Process a single parameter value."""
+            """Process a single parameter value with optimized UUID handling."""
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
                 return value.bytes
-            if isinstance(value, str):
+            # Fast path: only try UUID parsing if string matches UUID pattern
+            if isinstance(value, str) and _UUID_PATTERN.match(value):
                 try:
                     parsed_uuid = uuid.UUID(value)
                     return parsed_uuid.bytes
                 except ValueError:
+                    # Shouldn't happen with valid pattern, but be safe
                     return value
             return value
 
@@ -183,7 +201,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 key: process_value(value) for key, value in parameters.items()
             }
         if isinstance(parameters, (list, tuple)):
-            return [process_value(value) for value in parameters]
+            return type(parameters)(process_value(value) for value in parameters)
         return process_value(parameters)
 
     def _convert_named_params_with_casting(
@@ -194,6 +212,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         ] = None,
     ) -> t.Tuple[str, t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]]:
         """Convert named parameters with PostgreSQL casting syntax to positional parameters.
+
+        Optimized version using pre-compiled regex patterns.
 
         Transforms queries like:
         'SELECT * FROM table WHERE col = :param::UUID LIMIT :limit'
@@ -206,14 +226,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if parameters is None or not isinstance(parameters, dict):
             return querystring, parameters
 
-        import re
-
-        # Find all named parameters with optional casting syntax
-        # Pattern matches :param_name optionally followed by ::TYPE
-        param_pattern = r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?"
-
-        # Find all parameter references in the query
-        matches = list(re.finditer(param_pattern, querystring))
+        # Find all parameter references in the query using pre-compiled pattern
+        matches = list(_PARAM_PATTERN.finditer(querystring))
 
         if not matches:
             return querystring, parameters
@@ -244,15 +258,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         for i, param_name in enumerate(param_order, 1):
             # Replace all occurrences of this parameter with $N, preserving any casting
-            param_pattern_specific = (
+            param_pattern_specific = re.compile(
                 f":({re.escape(param_name)})" + r"(::[\w\[\]]+)?"
             )
             replacement = f"${i}\\2"  # $N + casting part (group 2)
 
             # Perform replacement and verify it worked
-            new_query = re.sub(
-                param_pattern_specific, replacement, converted_query
-            )
+            new_query = param_pattern_specific.sub(replacement, converted_query)
 
             # Defensive check: ensure replacement actually occurred
             if (
@@ -261,7 +273,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             ):
                 raise RuntimeError(
                     f"Failed to replace parameter '{param_name}' in query. "
-                    f"Pattern: {param_pattern_specific}, Query: {converted_query}"
+                    f"Query: {converted_query}"
                 )
 
             converted_query = new_query
@@ -274,9 +286,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         # Final defensive check: ensure no named parameters remain in the converted query
         # Look for the original parameter pattern, but exclude matches that are part of casting syntax
         remaining_matches = []
-        for match in re.finditer(param_pattern, converted_query):
+        for match in _PARAM_PATTERN.finditer(converted_query):
             full_match = match.group(0)
-            param_name = match.group(1)
             # Check if this looks like a real parameter (not casting syntax)
             # Real parameters should not be preceded by a positional parameter like $1, $2, etc.
             start_pos = match.start()
@@ -287,7 +298,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                     max(0, start_pos - 4) : start_pos
                 ]
                 # If preceded by $N: (positional parameter followed by colon), this is casting syntax
-                if re.search(r"\$\d+:$", preceding_text):
+                if _POSITIONAL_CHECK.search(preceding_text):
                     continue
                 # Also check the older pattern for backward compatibility
                 if re.search(r"\$\d+$", preceding_text):
@@ -323,6 +334,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         operation: str,
         seq_of_parameters: t.Sequence[t.Sequence[t.Any]],
     ) -> None:
+        """Optimized batch execution with better parameter processing."""
         adapt_connection = self._adapt_connection
 
         self._description = None
@@ -330,21 +342,18 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if not adapt_connection._started:
             await adapt_connection._start_transaction()
 
-        processed_seq = [
-            self._process_parameters(params) for params in seq_of_parameters
-        ]
-
-        # Convert to the expected type for execute_many
+        # Optimized: process and convert in single pass
         converted_seq: t.List[t.List[t.Any]] = []
-        for params in processed_seq:
-            if params is None:
+        for params in seq_of_parameters:
+            processed = self._process_parameters(params)
+            if processed is None:
                 converted_seq.append([])
-            elif isinstance(params, dict):
-                converted_seq.append(list(params.values()))
-            elif isinstance(params, (list, tuple)):
-                converted_seq.append(list(params))
+            elif isinstance(processed, dict):
+                converted_seq.append(list(processed.values()))
+            elif isinstance(processed, (list, tuple)):
+                converted_seq.append(list(processed))
             else:
-                converted_seq.append([params])
+                converted_seq.append([processed])
 
         return await self._connection.execute_many(
             operation,
@@ -479,6 +488,8 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "_isolation_setting",
         "_prepared_statement_cache",
         "_prepared_statement_name_func",
+        "_query_cache",
+        "_cache_max_size",
         "_started",
         "_transaction",
         "_connection_valid",
@@ -489,7 +500,12 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "readonly",
     )
 
-    def __init__(self, dbapi: t.Any, connection: psqlpy.Connection) -> None:
+    def __init__(
+        self,
+        dbapi: t.Any,
+        connection: psqlpy.Connection,
+        cache_max_size: int = 500
+    ) -> None:
         super().__init__(dbapi, connection)
         self.isolation_level = self._isolation_setting = None
         self.readonly = False
@@ -498,11 +514,16 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._started = False
         self._connection_valid = True
         self._last_ping_time = 0.0
+        # Query cache for prepared statements (LRU-like behavior)
+        self._query_cache: t.Dict[str, t.Any] = {}
+        self._cache_max_size = cache_max_size
         self._performance_stats = {
             "queries_executed": 0,
             "transactions_committed": 0,
             "transactions_rolled_back": 0,
             "connection_errors": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
         }
 
     async def _start_transaction(self) -> None:
@@ -595,7 +616,30 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             "transactions_committed": 0,
             "transactions_rolled_back": 0,
             "connection_errors": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
         }
+
+    def _get_cached_query(self, query_key: str) -> t.Optional[t.Any]:
+        """Get a cached prepared statement if available."""
+        cached = self._query_cache.get(query_key)
+        if cached is not None:
+            self._performance_stats["cache_hits"] += 1
+            return cached
+        self._performance_stats["cache_misses"] += 1
+        return None
+
+    def _cache_query(self, query_key: str, prepared_stmt: t.Any) -> None:
+        """Cache a prepared statement with LRU-like eviction."""
+        # Simple LRU: if cache is full, remove oldest entry
+        if len(self._query_cache) >= self._cache_max_size:
+            # Remove first (oldest) item
+            self._query_cache.pop(next(iter(self._query_cache)))
+        self._query_cache[query_key] = prepared_stmt
+
+    def clear_query_cache(self) -> None:
+        """Clear the query cache."""
+        self._query_cache.clear()
 
     def close(self) -> None:
         self.rollback()
