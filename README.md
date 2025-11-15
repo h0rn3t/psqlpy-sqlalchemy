@@ -245,7 +245,6 @@ The dialect consists of several key components:
 
 ## Limitations
 
-- **Synchronous Only**: Current implementation provides synchronous interface only
 - **Basic Transaction Support**: Advanced transaction features may need additional implementation
 - **Limited Error Mapping**: psqlpy exceptions are currently mapped to generic DBAPI exceptions
 
