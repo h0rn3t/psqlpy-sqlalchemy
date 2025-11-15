@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import re
 import typing as t
@@ -7,6 +8,7 @@ from typing import Any, Optional, Tuple, Union
 
 import psqlpy
 from psqlpy import row_factories
+from sqlalchemy import util
 from sqlalchemy.connectors.asyncio import (
     AsyncAdapt_dbapi_connection,
     AsyncAdapt_dbapi_cursor,
@@ -15,12 +17,12 @@ from sqlalchemy.connectors.asyncio import (
 from sqlalchemy.dialects.postgresql.base import PGExecutionContext
 from sqlalchemy.util.concurrency import await_only
 
-# Pre-compile regex patterns for performance
+# Compiled regex patterns used for parameter substitution
 _PARAM_PATTERN = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?")
 _CASTING_PATTERN = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)::")
 _POSITIONAL_CHECK = re.compile(r"\$\d+:$")
 
-# UUID pattern for fast validation
+# UUID pattern for validation
 _UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE
@@ -73,10 +75,15 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> None:
-        """Enhanced prepared statement execution with better error handling and optimization"""
+        """Execute a prepared statement.
 
-        # Optimized transaction check - single condition
+        Ensures transaction context is active before executing the statement.
+        Processes parameters to handle type conversions and named-to-positional
+        parameter conversion for PostgreSQL's numeric parameter style.
+        """
         adapt_conn = self._adapt_connection
+
+        # Ensure transaction is started
         if not adapt_conn._started:
             await adapt_conn._start_transaction()
 
@@ -97,8 +104,6 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             and not isinstance(converted_params, dict)
             and converted_query == querystring
         ):  # Query unchanged means mixed parameters detected
-            import re
-
             # Look specifically for PostgreSQL casting syntax :param::TYPE
             casting_pattern = r":([a-zA-Z_][a-zA-Z0-9_]*)::"
             casting_matches = re.findall(casting_pattern, converted_query)
@@ -116,6 +121,10 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 )
 
         try:
+            # NOTE: Unlike asyncpg, psqlpy requires parameters at prepare() time
+            # and execute() doesn't accept parameters. This prevents caching
+            # prepared statements like asyncpg does. This is a fundamental
+            # limitation of psqlpy's API design.
             prepared_stmt = await self._connection.prepare(
                 querystring=converted_query,
                 parameters=converted_params,
@@ -145,7 +154,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
             results = await prepared_stmt.execute()
 
-            # Optimized: direct iteration without intermediate tuple creation
+            # Direct iteration without intermediate tuple creation
             rows_list = [
                 tuple(value for _, value in row)
                 for row in results.row_factory(row_factories.tuple_row)
@@ -171,9 +180,10 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             t.Sequence[t.Any], t.Mapping[str, Any], None
         ] = None,
     ) -> t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]:
-        """Process parameters to ensure proper type conversion for psqlpy.
+        """Process parameters for type conversion.
 
-        Optimized version that avoids unnecessary UUID parsing attempts.
+        Converts UUID objects to bytes format required by psqlpy.
+        Also handles string UUIDs by parsing and converting to bytes.
         """
         if parameters is None:
             return None
@@ -181,12 +191,12 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         import uuid
 
         def process_value(value: Any) -> Any:
-            """Process a single parameter value with optimized UUID handling."""
+            """Process a single parameter value for UUID conversion."""
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
                 return value.bytes
-            # Fast path: only try UUID parsing if string matches UUID pattern
+            # Only attempt UUID parsing for strings matching UUID pattern
             if isinstance(value, str) and _UUID_PATTERN.match(value):
                 try:
                     parsed_uuid = uuid.UUID(value)
@@ -213,8 +223,6 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     ) -> t.Tuple[str, t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]]:
         """Convert named parameters with PostgreSQL casting syntax to positional parameters.
 
-        Optimized version using pre-compiled regex patterns.
-
         Transforms queries like:
         'SELECT * FROM table WHERE col = :param::UUID LIMIT :limit'
 
@@ -222,6 +230,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         'SELECT * FROM table WHERE col = $1::UUID LIMIT $2'
 
         And converts the parameters dict to a list in the correct order.
+        Uses pre-compiled regex patterns for parameter detection.
         """
         if parameters is None or not isinstance(parameters, dict):
             return querystring, parameters
@@ -329,36 +338,104 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     def arraysize(self, value: int) -> None:
         self._arraysize = value
 
+    def _is_simple_insert(self, operation: str) -> bool:
+        """Check if operation is a simple INSERT statement.
+
+        Returns True if the query is INSERT INTO with VALUES clause
+        and no RETURNING clause, allowing multi-value INSERT transformation.
+        """
+        operation_upper = operation.upper().strip()
+        return (
+            operation_upper.startswith('INSERT INTO') and
+            'VALUES' in operation_upper and
+            'RETURNING' not in operation_upper
+        )
+
     async def _executemany(
         self,
         operation: str,
         seq_of_parameters: t.Sequence[t.Sequence[t.Any]],
     ) -> None:
-        """Optimized batch execution with better parameter processing."""
-        adapt_connection = self._adapt_connection
+        """Execute a batch of parameter sets.
 
+        For simple INSERT statements, automatically transforms multiple
+        individual INSERTs into a single multi-value INSERT statement:
+
+            INSERT INTO t VALUES ($1, $2)  (executed N times)
+
+        Becomes:
+
+            INSERT INTO t VALUES ($1,$2), ($3,$4), ..., ($N*2-1,$N*2)
+
+        This transformation reduces network round-trips from N to 1.
+        For non-INSERT statements, delegates to psqlpy's execute_many.
+        """
+        adapt_connection = self._adapt_connection
         self._description = None
 
+        # Ensure transaction context is active before batch execution
         if not adapt_connection._started:
             await adapt_connection._start_transaction()
 
-        # Optimized: process and convert in single pass
-        converted_seq: t.List[t.List[t.Any]] = []
-        for params in seq_of_parameters:
-            processed = self._process_parameters(params)
-            if processed is None:
-                converted_seq.append([])
-            elif isinstance(processed, dict):
-                converted_seq.append(list(processed.values()))
-            elif isinstance(processed, (list, tuple)):
-                converted_seq.append(list(processed))
-            else:
-                converted_seq.append([processed])
+        # Process all parameters first
+        if seq_of_parameters and all(isinstance(p, (list, tuple)) for p in seq_of_parameters):
+            converted_seq = [list(p) for p in seq_of_parameters]
+        else:
+            converted_seq: t.List[t.List[t.Any]] = []
+            for params in seq_of_parameters:
+                processed = self._process_parameters(params)
+                if processed is None:
+                    converted_seq.append([])
+                elif isinstance(processed, dict):
+                    converted_seq.append(list(processed.values()))
+                elif isinstance(processed, (list, tuple)):
+                    converted_seq.append(list(processed))
+                else:
+                    converted_seq.append([processed])
 
+        # For simple INSERT statements, transform to multi-value INSERT
+        # to reduce network round-trips
+        if self._is_simple_insert(operation) and len(converted_seq) > 1:
+            # Build multi-value INSERT:  VALUES ($1,$2), ($3,$4), ...
+            # Count placeholders in original query
+            placeholder_count = operation.count('$')
+
+            if placeholder_count > 0:
+                # Build new VALUES clause with all rows
+                values_parts = []
+                flat_params = []
+                param_idx = 1
+
+                for row_params in converted_seq:
+                    # Create placeholders for this row: ($1, $2, ...)
+                    row_placeholders = ', '.join([f'${i}' for i in range(param_idx, param_idx + len(row_params))])
+                    values_parts.append(f'({row_placeholders})')
+                    flat_params.extend(row_params)
+                    param_idx += len(row_params)
+
+                # Replace original VALUES (...) with multi-row VALUES
+                # Find and replace the VALUES clause
+                import re
+                multi_value_query = re.sub(
+                    r'VALUES\s*\([^)]*\)',
+                    f"VALUES {', '.join(values_parts)}",
+                    operation,
+                    flags=re.IGNORECASE
+                )
+
+                # Execute as single query
+                try:
+                    await self._connection.execute(multi_value_query, flat_params)
+                    return
+                except Exception:
+                    # If multi-value fails, fall back to execute_many
+                    pass
+
+        # Fallback: use standard execute_many with prepared statements
         return await self._connection.execute_many(
             operation,
             converted_seq,
-            True,
+            prepared=True,
         )
 
     def execute(
@@ -383,7 +460,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
     AsyncAdapt_dbapi_ss_cursor,
     AsyncAdapt_psqlpy_cursor,
 ):
-    """Enhanced server-side cursor with better async iteration support"""
+    """Server-side cursor implementation for psqlpy."""
 
     _cursor: t.Optional[psqlpy.Cursor]
 
@@ -400,7 +477,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         self,
         result: psqlpy.QueryResult,
     ) -> Tuple[Tuple[Any, ...], ...]:
-        """Enhanced result conversion with better error handling"""
+        """Convert psqlpy QueryResult to tuple of tuples."""
         if result is None:
             return ()
 
@@ -414,7 +491,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
             return ()
 
     def close(self) -> None:
-        """Enhanced close with proper state management"""
+        """Close the cursor and release resources."""
         if self._cursor is not None and not self._closed:
             try:
                 self._cursor.close()
@@ -426,7 +503,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
                 self._closed = True
 
     def fetchone(self) -> Optional[Tuple[Any, ...]]:
-        """Fetch one row with enhanced error handling"""
+        """Fetch the next row from the cursor."""
         if self._closed or self._cursor is None:
             return None
 
@@ -438,7 +515,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
             return None
 
     def fetchmany(self, size: Optional[int] = None) -> t.List[Tuple[Any, ...]]:
-        """Fetch many rows with enhanced error handling"""
+        """Fetch the next set of rows from the cursor."""
         if self._closed or self._cursor is None:
             return []
 
@@ -451,7 +528,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
             return []
 
     def fetchall(self) -> t.List[Tuple[Any, ...]]:
-        """Fetch all rows with enhanced error handling"""
+        """Fetch all remaining rows from the cursor."""
         if self._closed or self._cursor is None:
             return []
 
@@ -495,6 +572,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "_connection_valid",
         "_last_ping_time",
         "_performance_stats",
+        "_execute_mutex",
         "deferrable",
         "isolation_level",
         "readonly",
@@ -504,7 +582,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self,
         dbapi: t.Any,
         connection: psqlpy.Connection,
-        cache_max_size: int = 500
+        cache_max_size: int = 100
     ) -> None:
         super().__init__(dbapi, connection)
         self.isolation_level = self._isolation_setting = None
@@ -514,9 +592,22 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._started = False
         self._connection_valid = True
         self._last_ping_time = 0.0
-        # Query cache for prepared statements (LRU-like behavior)
+
+        # Async lock for coordinating concurrent operations
+        self._execute_mutex = asyncio.Lock()
+
+        # LRU cache for prepared statements. Defaults to 100 statements per
+        # connection. The cache is on a per-connection basis, stored within
+        # connections pooled by the connection pool.
+        if cache_max_size > 0:
+            self._prepared_statement_cache = util.LRUCache(cache_max_size)
+        else:
+            self._prepared_statement_cache = None
+
+        # Legacy query cache (kept for compatibility)
         self._query_cache: t.Dict[str, t.Any] = {}
         self._cache_max_size = cache_max_size
+
         self._performance_stats = {
             "queries_executed": 0,
             "transactions_committed": 0,
@@ -527,7 +618,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         }
 
     async def _start_transaction(self) -> None:
-        """Start a new transaction with enhanced state tracking"""
+        """Start a new transaction."""
         if self._transaction is not None:
             # Transaction already started
             return
@@ -546,7 +637,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self.isolation_level = self._isolation_setting = level
 
     def rollback(self) -> None:
-        """Rollback transaction with enhanced error handling"""
+        """Rollback the current transaction."""
         try:
             if self._transaction is not None:
                 await_only(self._transaction.rollback())
@@ -563,7 +654,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             self._started = False
 
     def commit(self) -> None:
-        """Commit transaction with enhanced error handling"""
+        """Commit the current transaction."""
         try:
             if self._transaction is not None:
                 await_only(self._transaction.commit())
