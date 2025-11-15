@@ -3,7 +3,6 @@ import contextlib
 import re
 import typing as t
 from collections import deque
-from functools import lru_cache
 from typing import Any, Optional, Tuple, Union
 
 import psqlpy
@@ -25,7 +24,7 @@ _POSITIONAL_CHECK = re.compile(r"\$\d+:$")
 # UUID pattern for validation
 _UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 if t.TYPE_CHECKING:
@@ -211,7 +210,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 key: process_value(value) for key, value in parameters.items()
             }
         if isinstance(parameters, (list, tuple)):
-            return type(parameters)(process_value(value) for value in parameters)
+            return type(parameters)(
+                process_value(value) for value in parameters
+            )
         return process_value(parameters)
 
     def _convert_named_params_with_casting(
@@ -273,7 +274,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             replacement = f"${i}\\2"  # $N + casting part (group 2)
 
             # Perform replacement and verify it worked
-            new_query = param_pattern_specific.sub(replacement, converted_query)
+            new_query = param_pattern_specific.sub(
+                replacement, converted_query
+            )
 
             # Defensive check: ensure replacement actually occurred
             if (
@@ -346,9 +349,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         """
         operation_upper = operation.upper().strip()
         return (
-            operation_upper.startswith('INSERT INTO') and
-            'VALUES' in operation_upper and
-            'RETURNING' not in operation_upper
+            operation_upper.startswith("INSERT INTO")
+            and "VALUES" in operation_upper
+            and "RETURNING" not in operation_upper
         )
 
     async def _executemany(
@@ -378,10 +381,12 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             await adapt_connection._start_transaction()
 
         # Process all parameters first
-        if seq_of_parameters and all(isinstance(p, (list, tuple)) for p in seq_of_parameters):
+        if seq_of_parameters and all(
+            isinstance(p, (list, tuple)) for p in seq_of_parameters
+        ):
             converted_seq = [list(p) for p in seq_of_parameters]
         else:
-            converted_seq: t.List[t.List[t.Any]] = []
+            converted_seq = []
             for params in seq_of_parameters:
                 processed = self._process_parameters(params)
                 if processed is None:
@@ -398,7 +403,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if self._is_simple_insert(operation) and len(converted_seq) > 1:
             # Build multi-value INSERT:  VALUES ($1,$2), ($3,$4), ...
             # Count placeholders in original query
-            placeholder_count = operation.count('$')
+            placeholder_count = operation.count("$")
 
             if placeholder_count > 0:
                 # Build new VALUES clause with all rows
@@ -408,25 +413,35 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
                 for row_params in converted_seq:
                     # Create placeholders for this row: ($1, $2, ...)
-                    row_placeholders = ', '.join([f'${i}' for i in range(param_idx, param_idx + len(row_params))])
-                    values_parts.append(f'({row_placeholders})')
+                    row_placeholders = ", ".join(
+                        [
+                            f"${i}"
+                            for i in range(
+                                param_idx, param_idx + len(row_params)
+                            )
+                        ]
+                    )
+                    values_parts.append(f"({row_placeholders})")
                     flat_params.extend(row_params)
                     param_idx += len(row_params)
 
                 # Replace original VALUES (...) with multi-row VALUES
                 # Find and replace the VALUES clause
                 import re
+
                 multi_value_query = re.sub(
-                    r'VALUES\s*\([^)]*\)',
+                    r"VALUES\s*\([^)]*\)",
                     f"VALUES {', '.join(values_parts)}",
                     operation,
-                    flags=re.IGNORECASE
+                    flags=re.IGNORECASE,
                 )
 
                 # Execute as single query
                 try:
-                    await self._connection.execute(multi_value_query, flat_params)
-                    return
+                    await self._connection.execute(
+                        multi_value_query, flat_params
+                    )
+                    return None
                 except Exception:
                     # If multi-value fails, fall back to execute_many
                     pass
@@ -582,7 +597,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self,
         dbapi: t.Any,
         connection: psqlpy.Connection,
-        cache_max_size: int = 100
+        prepared_statement_cache_size: int = 100,
     ) -> None:
         super().__init__(dbapi, connection)
         self.isolation_level = self._isolation_setting = None
@@ -599,14 +614,16 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         # LRU cache for prepared statements. Defaults to 100 statements per
         # connection. The cache is on a per-connection basis, stored within
         # connections pooled by the connection pool.
-        if cache_max_size > 0:
-            self._prepared_statement_cache = util.LRUCache(cache_max_size)
+        if prepared_statement_cache_size > 0:
+            self._prepared_statement_cache = util.LRUCache(
+                prepared_statement_cache_size
+            )
         else:
             self._prepared_statement_cache = None
 
         # Legacy query cache (kept for compatibility)
         self._query_cache: t.Dict[str, t.Any] = {}
-        self._cache_max_size = cache_max_size
+        self._cache_max_size = prepared_statement_cache_size
 
         self._performance_stats = {
             "queries_executed": 0,
