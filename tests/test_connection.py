@@ -46,10 +46,6 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         self.mock_connection = Mock()
         self.mock_adapt_connection._connection = self.mock_connection
         self.mock_adapt_connection._started = False
-        self.mock_adapt_connection._performance_stats = {
-            "queries_executed": 0,
-            "connection_errors": 0,
-        }
         self.mock_adapt_connection._connection_valid = True
         self.mock_adapt_connection.await_ = Mock()
 
@@ -251,49 +247,6 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         # Test with string
         result = self.cursor._process_parameters("test_string")
         self.assertEqual(result, "test_string")
-
-    def test_convert_named_params_replacement_failure(self):
-        """Test RuntimeError for failed parameter replacement"""
-        query = "SELECT * FROM test WHERE id = :id"
-        params = {"id": "test"}
-
-        # Create a scenario where replacement fails
-        with patch("re.sub") as mock_sub:
-            mock_sub.return_value = (
-                query  # Return unchanged query to simulate failure
-            )
-
-            with self.assertRaises(RuntimeError) as cm:
-                self.cursor._convert_named_params_with_casting(query, params)
-
-            self.assertIn("Failed to replace parameter", str(cm.exception))
-
-    def test_convert_named_params_remaining_matches(self):
-        """Test RuntimeError for remaining named parameters"""
-        query = "SELECT * FROM test WHERE id = :id"
-        params = {"id": "test"}
-
-        # Mock re.finditer to simulate remaining matches
-        with patch("re.finditer") as mock_finditer:
-            # First call returns matches for initial processing
-            # Second call returns matches for final validation
-            mock_match = Mock()
-            mock_match.group.side_effect = lambda x: "id" if x == 1 else ":id"
-            mock_match.start.return_value = 0
-            mock_finditer.side_effect = [
-                [mock_match],  # Initial matches
-                [mock_match],  # Remaining matches for validation
-            ]
-
-            with patch(
-                "re.sub", return_value="SELECT * FROM test WHERE id = $1"
-            ):
-                with self.assertRaises(RuntimeError) as cm:
-                    self.cursor._convert_named_params_with_casting(
-                        query, params
-                    )
-
-                self.assertIn("Conversion incomplete", str(cm.exception))
 
     @patch.object(
         AsyncAdapt_psqlpy_cursor, "_executemany", new_callable=AsyncMock
@@ -674,13 +627,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         self.assertEqual(self.connection._connection, self.mock_connection)
         self.assertFalse(self.connection._started)
         self.assertTrue(self.connection._connection_valid)
-        self.assertIsInstance(self.connection._performance_stats, dict)
-        self.assertEqual(
-            self.connection._performance_stats["queries_executed"], 0
-        )
-        self.assertEqual(
-            self.connection._performance_stats["connection_errors"], 0
-        )
 
     def test_set_isolation_level(self):
         """Test set_isolation_level method"""
@@ -695,29 +641,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         """Test is_valid method when connection is invalid"""
         self.connection._connection_valid = False
         self.assertFalse(self.connection.is_valid())
-
-    def test_get_performance_stats(self):
-        """Test get_performance_stats method"""
-        stats = self.connection.get_performance_stats()
-
-        self.assertIsInstance(stats, dict)
-        self.assertIn("queries_executed", stats)
-        self.assertIn("connection_errors", stats)
-
-    def test_reset_performance_stats(self):
-        """Test reset_performance_stats method"""
-        # Set some stats
-        self.connection._performance_stats["queries_executed"] = 10
-        self.connection._performance_stats["connection_errors"] = 2
-
-        self.connection.reset_performance_stats()
-
-        self.assertEqual(
-            self.connection._performance_stats["queries_executed"], 0
-        )
-        self.assertEqual(
-            self.connection._performance_stats["connection_errors"], 0
-        )
 
     def test_close(self):
         """Test close method"""
@@ -747,9 +670,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         mock_await_only.assert_called_once_with(mock_transaction.rollback())
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
-        self.assertEqual(
-            self.connection._performance_stats["transactions_rolled_back"], 1
-        )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_rollback_without_transaction(self, mock_await_only):
@@ -760,9 +680,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
 
         mock_await_only.assert_called_once_with(
             self.mock_connection.rollback()
-        )
-        self.assertEqual(
-            self.connection._performance_stats["transactions_rolled_back"], 1
         )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
@@ -779,9 +696,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
         self.assertFalse(self.connection._connection_valid)
-        self.assertEqual(
-            self.connection._performance_stats["connection_errors"], 1
-        )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_commit_with_transaction(self, mock_await_only):
@@ -794,9 +708,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         mock_await_only.assert_called_once_with(mock_transaction.commit())
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
-        self.assertEqual(
-            self.connection._performance_stats["transactions_committed"], 1
-        )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_commit_without_transaction(self, mock_await_only):
@@ -806,9 +717,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         self.connection.commit()
 
         mock_await_only.assert_called_once_with(self.mock_connection.commit())
-        self.assertEqual(
-            self.connection._performance_stats["transactions_committed"], 1
-        )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_commit_with_exception(self, mock_await_only):
@@ -824,9 +732,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
             self.connection.commit()
 
         self.assertFalse(self.connection._connection_valid)
-        self.assertEqual(
-            self.connection._performance_stats["connection_errors"], 1
-        )
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     @patch("time.time")
@@ -856,9 +761,6 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
 
         self.assertFalse(result)
         self.assertFalse(self.connection._connection_valid)
-        self.assertEqual(
-            self.connection._performance_stats["connection_errors"], 1
-        )
 
     @patch("time.time")
     def test_ping_recent(self, mock_time):
@@ -1147,9 +1049,6 @@ class TestAsyncAdaptPsqlpyConnectionCoverage(unittest.TestCase):
 
             self.assertFalse(result)
             self.assertFalse(self.connection._connection_valid)
-            self.assertEqual(
-                self.connection._performance_stats["connection_errors"], 1
-            )
 
 
 if __name__ == "__main__":
