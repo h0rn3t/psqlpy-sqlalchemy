@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import re
+import time
 import typing as t
 from collections import deque
 from typing import Any, Optional, Tuple, Union
@@ -54,6 +55,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
     _connection: psqlpy.Connection
+    _awaitable_cursor_close: bool = False
 
     def __init__(
         self, adapt_connection: "AsyncAdapt_psqlpy_connection"
@@ -120,10 +122,11 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 )
 
         try:
-            # NOTE: Unlike asyncpg, psqlpy requires parameters at prepare() time
-            # and execute() doesn't accept parameters. This prevents caching
-            # prepared statements like asyncpg does. This is a fundamental
-            # limitation of psqlpy's API design.
+            # NOTE: psqlpy's Python API requires parameters at prepare() time
+            # and PreparedStatement.execute() doesn't accept parameters.
+            # While psqlpy's internal Rust API supports reusable prepared statements
+            # (used by execute_many), the Python API doesn't expose this capability.
+            # This prevents caching prepared statements like asyncpg does.
             prepared_stmt = await self._connection.prepare(
                 querystring=converted_query,
                 parameters=converted_params,
@@ -161,15 +164,10 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             self._rows = deque(rows_list)
             self._rowcount = len(rows_list)
 
-            # Track query execution statistics
-            self._adapt_connection._performance_stats["queries_executed"] += 1
-
         except Exception:
             self._description = None
             self._rowcount = -1
             self._rows = deque()
-            # Track connection errors
-            self._adapt_connection._performance_stats["connection_errors"] += 1
             self._adapt_connection._connection_valid = False
             raise
 
@@ -376,6 +374,11 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         adapt_connection = self._adapt_connection
         self._description = None
 
+        # Check for schema cache invalidation
+        await adapt_connection._check_type_cache_invalidation(
+            self._invalidate_schema_cache_asof
+        )
+
         # Ensure transaction context is active before batch execution
         if not adapt_connection._started:
             await adapt_connection._start_transaction()
@@ -445,6 +448,22 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 except Exception:
                     # If multi-value fails, fall back to execute_many
                     pass
+
+        # For non-INSERT statements, use pipeline when transaction is active.
+        # This provides protocol-level batching similar to asyncpg.executemany().
+        # Pipeline sends all queries together and waits for all responses,
+        # dramatically reducing network round-trips compared to execute_many.
+        if adapt_connection._transaction is not None:
+            try:
+                # Build queries list for pipeline: [(query, params), ...]
+                queries = [(operation, params) for params in converted_seq]
+                await adapt_connection._transaction.pipeline(
+                    queries, prepared=True
+                )
+                return None
+            except Exception:
+                # If pipeline fails, fall back to execute_many
+                pass
 
         # Fallback: use standard execute_many with prepared statements
         return await self._connection.execute_many(
@@ -586,7 +605,6 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "_transaction",
         "_connection_valid",
         "_last_ping_time",
-        "_performance_stats",
         "_execute_mutex",
         "deferrable",
         "isolation_level",
@@ -607,6 +625,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._started = False
         self._connection_valid = True
         self._last_ping_time = 0.0
+        self._invalidate_schema_cache_asof = time.time()
 
         # Async lock for coordinating concurrent operations
         self._execute_mutex = asyncio.Lock()
@@ -621,18 +640,25 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         else:
             self._prepared_statement_cache = None
 
+        # Prepared statement name function (for compatibility with asyncpg)
+        self._prepared_statement_name_func = self._default_name_func
+
         # Legacy query cache (kept for compatibility)
         self._query_cache: t.Dict[str, t.Any] = {}
         self._cache_max_size = prepared_statement_cache_size
 
-        self._performance_stats = {
-            "queries_executed": 0,
-            "transactions_committed": 0,
-            "transactions_rolled_back": 0,
-            "connection_errors": 0,
-            "cache_hits": 0,
-            "cache_misses": 0,
-        }
+    async def _check_type_cache_invalidation(
+        self, invalidate_timestamp: float
+    ) -> None:
+        """Check if type cache needs invalidation.
+
+        Similar to asyncpg's implementation, tracks schema changes
+        that may invalidate cached type information.
+        """
+        if invalidate_timestamp > self._invalidate_schema_cache_asof:
+            # psqlpy doesn't have reload_schema_state like asyncpg,
+            # but we track the invalidation timestamp for consistency
+            self._invalidate_schema_cache_asof = invalidate_timestamp
 
     async def _start_transaction(self) -> None:
         """Start a new transaction."""
@@ -660,9 +686,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
                 await_only(self._transaction.rollback())
             else:
                 await_only(self._connection.rollback())  # type: ignore[attr-defined]
-            self._performance_stats["transactions_rolled_back"] += 1
         except Exception:
-            self._performance_stats["connection_errors"] += 1
             self._connection_valid = False
             # Ignore rollback errors as connection might be in bad state
             pass
@@ -677,9 +701,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
                 await_only(self._transaction.commit())
             else:
                 await_only(self._connection.commit())  # type: ignore[attr-defined]
-            self._performance_stats["transactions_committed"] += 1
         except Exception as e:
-            self._performance_stats["connection_errors"] += 1
             self._connection_valid = False
             # On commit failure, try to rollback
             with contextlib.suppress(Exception):
@@ -710,32 +732,11 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             return True
         except Exception:
             self._connection_valid = False
-            self._performance_stats["connection_errors"] += 1
             return False
-
-    def get_performance_stats(self) -> t.Dict[str, int]:
-        """Get connection performance statistics"""
-        return self._performance_stats.copy()
-
-    def reset_performance_stats(self) -> None:
-        """Reset performance statistics"""
-        self._performance_stats = {
-            "queries_executed": 0,
-            "transactions_committed": 0,
-            "transactions_rolled_back": 0,
-            "connection_errors": 0,
-            "cache_hits": 0,
-            "cache_misses": 0,
-        }
 
     def _get_cached_query(self, query_key: str) -> t.Optional[t.Any]:
         """Get a cached prepared statement if available."""
-        cached = self._query_cache.get(query_key)
-        if cached is not None:
-            self._performance_stats["cache_hits"] += 1
-            return cached
-        self._performance_stats["cache_misses"] += 1
-        return None
+        return self._query_cache.get(query_key)
 
     def _cache_query(self, query_key: str, prepared_stmt: t.Any) -> None:
         """Cache a prepared statement with LRU-like eviction."""
@@ -759,6 +760,15 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         if server_side:
             return self._ss_cursor_cls(self)
         return self._cursor_cls(self)
+
+    @staticmethod
+    def _default_name_func() -> None:
+        """Default prepared statement name function.
+
+        Returns None to let psqlpy auto-generate statement names.
+        Compatible with asyncpg's implementation.
+        """
+        return
 
 
 # Backward compatibility aliases
