@@ -326,21 +326,12 @@ class TestPsqlpyDialect(unittest.TestCase):
                 AsyncAdapt_psqlpy_connection,
             )
 
-            self.assertTrue(
-                hasattr(AsyncAdapt_psqlpy_connection, "get_performance_stats")
-            )
-            self.assertTrue(
-                hasattr(
-                    AsyncAdapt_psqlpy_connection, "reset_performance_stats"
-                )
-            )
             self.assertTrue(hasattr(AsyncAdapt_psqlpy_connection, "is_valid"))
             self.assertTrue(hasattr(AsyncAdapt_psqlpy_connection, "ping"))
 
             expected_slots = [
                 "_connection_valid",
                 "_last_ping_time",
-                "_performance_stats",
             ]
 
             for slot in expected_slots:
