@@ -383,6 +383,7 @@ For detailed performance benchmarks, run `make benchmark` or see [PERFORMANCE_TE
 
 - **Prepared Statement Reuse**: psqlpy's Python API requires parameters at prepare() time, preventing prepared statement caching like asyncpg.
 - **Error Mapping**: All psqlpy exceptions are mapped to a single `psqlpy.Error` class for DBAPI compatibility
+- **Basic Transaction Support**: Advanced transaction features may need additional implementation
 
 ## Contributing
 
@@ -421,7 +422,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Improved parameter type conversion with caching
 
 **API Improvements:**
-- Added asyncpg-compatible attribute naming for easier migration
+- Added asyncpg-compatible attribute naming
 - Implemented connection health checking with ping() method
 - Added transaction savepoint support
 - Improved error messages for UUID casting issues
