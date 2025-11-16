@@ -55,6 +55,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
     _connection: psqlpy.Connection  # type: ignore[assignment]
+    _cursor: t.Optional[t.Any]  # type: ignore[assignment]
     _awaitable_cursor_close: bool = False
 
     def __init__(
