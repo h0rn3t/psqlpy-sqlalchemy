@@ -7,18 +7,26 @@ This script benchmarks various database operations to measure performance improv
 
 import asyncio
 import time
+import typing as t
 from statistics import mean, median, stdev
-from typing import Any, Dict, List
+from typing import Dict, List
 
-from sqlalchemy import Column, Integer, String, Text, create_engine, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import (
+    Integer,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Database connection strings
-PSQLPY_URL = "postgresql+psqlpy://postgres:postgres@localhost:5432/postgres"
-ASYNCPG_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+PSQLPY_URL = "postgresql+psqlpy://postgres:password@localhost:5432/test_db"
+ASYNCPG_URL = "postgresql+asyncpg://postgres:password@localhost:5432/test_db"
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """Declarative base class for ORM models."""
 
 
 class TestModel(Base):
@@ -26,10 +34,10 @@ class TestModel(Base):
 
     __tablename__ = "benchmark_test"
 
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text)
-    value = Column(Integer, default=0)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[t.Optional[str]] = mapped_column(Text)
+    value: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class BenchmarkResult:
@@ -61,11 +69,11 @@ class BenchmarkResult:
         stats = self.get_stats()
         return (
             f"{self.name}:\n"
-            f"  Mean:   {stats['mean']*1000:.2f}ms\n"
-            f"  Median: {stats['median']*1000:.2f}ms\n"
-            f"  StdDev: {stats['stdev']*1000:.2f}ms\n"
-            f"  Min:    {stats['min']*1000:.2f}ms\n"
-            f"  Max:    {stats['max']*1000:.2f}ms"
+            f"  Mean:   {stats['mean'] * 1000:.2f}ms\n"
+            f"  Median: {stats['median'] * 1000:.2f}ms\n"
+            f"  StdDev: {stats['stdev'] * 1000:.2f}ms\n"
+            f"  Min:    {stats['min'] * 1000:.2f}ms\n"
+            f"  Max:    {stats['max'] * 1000:.2f}ms"
         )
 
 
@@ -78,25 +86,37 @@ async def setup_database(url: str) -> None:
     await engine.dispose()
 
 
-async def benchmark_simple_select(url: str, iterations: int = 100) -> BenchmarkResult:
+async def benchmark_simple_select(
+    url: str, iterations: int = 100
+) -> BenchmarkResult:
     """Benchmark simple SELECT queries."""
     result = BenchmarkResult("Simple SELECT")
-    engine = create_async_engine(url, echo=False, pool_size=10, max_overflow=20)
+    engine = create_async_engine(
+        url, echo=False, pool_size=10, max_overflow=20
+    )
 
     try:
         async with engine.begin() as conn:
             # Insert test data
             for i in range(100):
                 await conn.execute(
-                    text("INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"),
-                    {"name": f"test_{i}", "desc": f"Description {i}", "val": i}
+                    text(
+                        "INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"
+                    ),
+                    {
+                        "name": f"test_{i}",
+                        "desc": f"Description {i}",
+                        "val": i,
+                    },
                 )
 
         for _ in range(iterations):
             start = time.perf_counter()
             async with engine.connect() as conn:
-                result_proxy = await conn.execute(text("SELECT * FROM benchmark_test LIMIT 10"))
-                rows = result_proxy.fetchall()
+                result_proxy = await conn.execute(
+                    text("SELECT * FROM benchmark_test LIMIT 10")
+                )
+                result_proxy.fetchall()
             end = time.perf_counter()
             result.add_time(end - start)
 
@@ -106,13 +126,17 @@ async def benchmark_simple_select(url: str, iterations: int = 100) -> BenchmarkR
     return result
 
 
-async def benchmark_bulk_insert(url: str, batch_size: int = 1000, iterations: int = 10) -> BenchmarkResult:
+async def benchmark_bulk_insert(
+    url: str, batch_size: int = 1000, iterations: int = 10
+) -> BenchmarkResult:
     """Benchmark bulk INSERT operations."""
     result = BenchmarkResult(f"Bulk INSERT ({batch_size} rows)")
-    engine = create_async_engine(url, echo=False, pool_size=10, max_overflow=20)
+    engine = create_async_engine(
+        url, echo=False, pool_size=10, max_overflow=20
+    )
 
     try:
-        for iteration in range(iterations):
+        for _iteration in range(iterations):
             # Clear table before each iteration
             async with engine.begin() as conn:
                 await conn.execute(text("TRUNCATE benchmark_test"))
@@ -121,8 +145,14 @@ async def benchmark_bulk_insert(url: str, batch_size: int = 1000, iterations: in
             async with engine.begin() as conn:
                 for i in range(batch_size):
                     await conn.execute(
-                        text("INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"),
-                        {"name": f"test_{i}", "desc": f"Description {i}", "val": i}
+                        text(
+                            "INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"
+                        ),
+                        {
+                            "name": f"test_{i}",
+                            "desc": f"Description {i}",
+                            "val": i,
+                        },
                     )
             end = time.perf_counter()
             result.add_time(end - start)
@@ -133,13 +163,17 @@ async def benchmark_bulk_insert(url: str, batch_size: int = 1000, iterations: in
     return result
 
 
-async def benchmark_executemany(url: str, batch_size: int = 1000, iterations: int = 10) -> BenchmarkResult:
+async def benchmark_executemany(
+    url: str, batch_size: int = 1000, iterations: int = 10
+) -> BenchmarkResult:
     """Benchmark executemany operations."""
     result = BenchmarkResult(f"executemany ({batch_size} rows)")
-    engine = create_async_engine(url, echo=False, pool_size=10, max_overflow=20)
+    engine = create_async_engine(
+        url, echo=False, pool_size=10, max_overflow=20
+    )
 
     try:
-        for iteration in range(iterations):
+        for _iteration in range(iterations):
             # Clear table before each iteration
             async with engine.begin() as conn:
                 await conn.execute(text("TRUNCATE benchmark_test"))
@@ -153,8 +187,10 @@ async def benchmark_executemany(url: str, batch_size: int = 1000, iterations: in
             start = time.perf_counter()
             async with engine.begin() as conn:
                 await conn.execute(
-                    text("INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"),
-                    batch_data
+                    text(
+                        "INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"
+                    ),
+                    batch_data,
                 )
             end = time.perf_counter()
             result.add_time(end - start)
@@ -165,10 +201,14 @@ async def benchmark_executemany(url: str, batch_size: int = 1000, iterations: in
     return result
 
 
-async def benchmark_complex_query(url: str, iterations: int = 100) -> BenchmarkResult:
+async def benchmark_complex_query(
+    url: str, iterations: int = 100
+) -> BenchmarkResult:
     """Benchmark complex queries with aggregations."""
     result = BenchmarkResult("Complex query with aggregation")
-    engine = create_async_engine(url, echo=False, pool_size=10, max_overflow=20)
+    engine = create_async_engine(
+        url, echo=False, pool_size=10, max_overflow=20
+    )
 
     try:
         # Populate with test data
@@ -176,8 +216,14 @@ async def benchmark_complex_query(url: str, iterations: int = 100) -> BenchmarkR
             await conn.execute(text("TRUNCATE benchmark_test"))
             for i in range(1000):
                 await conn.execute(
-                    text("INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"),
-                    {"name": f"test_{i % 10}", "desc": f"Description {i}", "val": i}
+                    text(
+                        "INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"
+                    ),
+                    {
+                        "name": f"test_{i % 10}",
+                        "desc": f"Description {i}",
+                        "val": i,
+                    },
                 )
 
         complex_query = text("""
@@ -197,7 +243,7 @@ async def benchmark_complex_query(url: str, iterations: int = 100) -> BenchmarkR
             start = time.perf_counter()
             async with engine.connect() as conn:
                 result_proxy = await conn.execute(complex_query)
-                rows = result_proxy.fetchall()
+                result_proxy.fetchall()
             end = time.perf_counter()
             result.add_time(end - start)
 
@@ -207,10 +253,14 @@ async def benchmark_complex_query(url: str, iterations: int = 100) -> BenchmarkR
     return result
 
 
-async def benchmark_transaction(url: str, iterations: int = 50) -> BenchmarkResult:
+async def benchmark_transaction(
+    url: str, iterations: int = 50
+) -> BenchmarkResult:
     """Benchmark transaction performance."""
     result = BenchmarkResult("Transaction with multiple operations")
-    engine = create_async_engine(url, echo=False, pool_size=10, max_overflow=20)
+    engine = create_async_engine(
+        url, echo=False, pool_size=10, max_overflow=20
+    )
 
     try:
         for _ in range(iterations):
@@ -218,20 +268,24 @@ async def benchmark_transaction(url: str, iterations: int = 50) -> BenchmarkResu
             async with engine.begin() as conn:
                 # Multiple operations within transaction
                 await conn.execute(
-                    text("INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"),
-                    {"name": "tx_test", "desc": "Transaction test", "val": 1}
+                    text(
+                        "INSERT INTO benchmark_test (name, description, value) VALUES (:name, :desc, :val)"
+                    ),
+                    {"name": "tx_test", "desc": "Transaction test", "val": 1},
                 )
                 await conn.execute(
-                    text("UPDATE benchmark_test SET value = value + 1 WHERE name = :name"),
-                    {"name": "tx_test"}
+                    text(
+                        "UPDATE benchmark_test SET value = value + 1 WHERE name = :name"
+                    ),
+                    {"name": "tx_test"},
                 )
                 await conn.execute(
                     text("SELECT * FROM benchmark_test WHERE name = :name"),
-                    {"name": "tx_test"}
+                    {"name": "tx_test"},
                 )
                 await conn.execute(
                     text("DELETE FROM benchmark_test WHERE name = :name"),
-                    {"name": "tx_test"}
+                    {"name": "tx_test"},
                 )
             end = time.perf_counter()
             result.add_time(end - start)
@@ -242,11 +296,13 @@ async def benchmark_transaction(url: str, iterations: int = 50) -> BenchmarkResu
     return result
 
 
-async def run_benchmarks(url: str, dialect_name: str) -> Dict[str, BenchmarkResult]:
+async def run_benchmarks(
+    url: str, dialect_name: str
+) -> Dict[str, BenchmarkResult]:
     """Run all benchmarks for a specific dialect."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Running benchmarks for {dialect_name}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     results = {}
 
@@ -256,16 +312,24 @@ async def run_benchmarks(url: str, dialect_name: str) -> Dict[str, BenchmarkResu
 
     # Run benchmarks
     print("Running simple SELECT benchmark...")
-    results["simple_select"] = await benchmark_simple_select(url, iterations=100)
+    results["simple_select"] = await benchmark_simple_select(
+        url, iterations=100
+    )
 
     print("Running bulk INSERT benchmark...")
-    results["bulk_insert"] = await benchmark_bulk_insert(url, batch_size=1000, iterations=10)
+    results["bulk_insert"] = await benchmark_bulk_insert(
+        url, batch_size=1000, iterations=10
+    )
 
     print("Running executemany benchmark...")
-    results["executemany"] = await benchmark_executemany(url, batch_size=1000, iterations=10)
+    results["executemany"] = await benchmark_executemany(
+        url, batch_size=1000, iterations=10
+    )
 
     print("Running complex query benchmark...")
-    results["complex_query"] = await benchmark_complex_query(url, iterations=100)
+    results["complex_query"] = await benchmark_complex_query(
+        url, iterations=100
+    )
 
     print("Running transaction benchmark...")
     results["transaction"] = await benchmark_transaction(url, iterations=50)
@@ -273,20 +337,27 @@ async def run_benchmarks(url: str, dialect_name: str) -> Dict[str, BenchmarkResu
     return results
 
 
-def print_comparison(psqlpy_results: Dict[str, BenchmarkResult], asyncpg_results: Dict[str, BenchmarkResult]) -> None:
+def print_comparison(
+    psqlpy_results: Dict[str, BenchmarkResult],
+    asyncpg_results: Dict[str, BenchmarkResult],
+) -> None:
     """Print comparison of results."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("PERFORMANCE COMPARISON RESULTS")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
-    for benchmark_name in psqlpy_results.keys():
+    for benchmark_name in psqlpy_results:
         psqlpy_stats = psqlpy_results[benchmark_name].get_stats()
         asyncpg_stats = asyncpg_results[benchmark_name].get_stats()
 
         psqlpy_mean = psqlpy_stats["mean"] * 1000  # Convert to ms
         asyncpg_mean = asyncpg_stats["mean"] * 1000  # Convert to ms
 
-        improvement = ((asyncpg_mean - psqlpy_mean) / asyncpg_mean) * 100 if asyncpg_mean > 0 else 0
+        improvement = (
+            ((asyncpg_mean - psqlpy_mean) / asyncpg_mean) * 100
+            if asyncpg_mean > 0
+            else 0
+        )
 
         print(f"\n{benchmark_name.upper().replace('_', ' ')}:")
         print(f"  psqlpy-sqlalchemy: {psqlpy_mean:.2f}ms (mean)")
@@ -297,12 +368,12 @@ def print_comparison(psqlpy_results: Dict[str, BenchmarkResult], asyncpg_results
         elif improvement < 0:
             print(f"  ✗ psqlpy is {abs(improvement):.1f}% SLOWER")
         else:
-            print(f"  = Performance is EQUAL")
+            print("  = Performance is EQUAL")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
 
 
-async def main():
+async def main() -> int:
     """Main benchmark runner."""
     print("PostgreSQL SQLAlchemy Dialect Performance Comparison")
     print("Comparing psqlpy-sqlalchemy vs asyncpg")
@@ -316,9 +387,9 @@ async def main():
         asyncpg_results = await run_benchmarks(ASYNCPG_URL, "asyncpg")
 
         # Print detailed results
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("DETAILED RESULTS")
-        print("="*60)
+        print("=" * 60)
 
         print("\n--- psqlpy-sqlalchemy ---")
         for result in psqlpy_results.values():
@@ -334,6 +405,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ Error running benchmarks: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
