@@ -54,7 +54,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     )
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
-    _connection: psqlpy.Connection
+    _connection: psqlpy.Connection  # type: ignore[assignment]
     _awaitable_cursor_close: bool = False
 
     def __init__(
@@ -146,11 +146,11 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             ]
 
             if self.server_side:
-                self._cursor = self._connection.cursor(
+                self._cursor = self._connection.cursor(  # type: ignore[assignment]
                     converted_query,
                     converted_params,
                 )
-                await self._cursor.start()
+                await self._cursor.start()  # type: ignore[attr-defined]
                 self._rowcount = -1
                 return
 
@@ -456,7 +456,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if adapt_connection._transaction is not None:
             try:
                 # Build queries list for pipeline: [(query, params), ...]
-                queries = [(operation, params) for params in converted_seq]
+                queries: t.List[t.Tuple[str, t.Optional[t.List[t.Any]]]] = [
+                    (operation, params) for params in converted_seq
+                ]
                 await adapt_connection._transaction.pipeline(
                     queries, prepared=True
                 )
@@ -496,7 +498,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
 ):
     """Server-side cursor implementation for psqlpy."""
 
-    _cursor: t.Optional[psqlpy.Cursor]
+    _cursor: t.Optional[psqlpy.Cursor]  # type: ignore[assignment]
 
     def __init__(
         self, adapt_connection: "AsyncAdapt_psqlpy_connection"
@@ -588,10 +590,10 @@ class AsyncAdapt_psqlpy_ss_cursor(
 
 
 class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
-    _cursor_cls = AsyncAdapt_psqlpy_cursor
-    _ss_cursor_cls = AsyncAdapt_psqlpy_ss_cursor
+    _cursor_cls = AsyncAdapt_psqlpy_cursor  # type: ignore[assignment]
+    _ss_cursor_cls = AsyncAdapt_psqlpy_ss_cursor  # type: ignore[assignment]
 
-    _connection: psqlpy.Connection
+    _connection: psqlpy.Connection  # type: ignore[assignment]
     _transaction: t.Optional[psqlpy.Transaction]
 
     __slots__ = (
@@ -617,7 +619,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         connection: psqlpy.Connection,
         prepared_statement_cache_size: int = 100,
     ) -> None:
-        super().__init__(dbapi, connection)
+        super().__init__(dbapi, connection)  # type: ignore[arg-type]
         self.isolation_level = self._isolation_setting = None
         self.readonly = False
         self.deferrable = False
@@ -633,6 +635,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         # LRU cache for prepared statements. Defaults to 100 statements per
         # connection. The cache is on a per-connection basis, stored within
         # connections pooled by the connection pool.
+        self._prepared_statement_cache: t.Optional[util.LRUCache[t.Any, t.Any]]
         if prepared_statement_cache_size > 0:
             self._prepared_statement_cache = util.LRUCache(
                 prepared_statement_cache_size
