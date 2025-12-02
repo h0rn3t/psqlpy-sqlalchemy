@@ -4,7 +4,7 @@ import re
 import time
 import typing as t
 from collections import deque
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 import psqlpy
 from psqlpy import row_factories
@@ -55,7 +55,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
     _adapt_connection: "AsyncAdapt_psqlpy_connection"
     _connection: psqlpy.Connection  # type: ignore[assignment]
-    _cursor: t.Optional[t.Any]  # type: ignore[assignment]
+    _cursor: t.Any | None  # type: ignore[assignment]
     _awaitable_cursor_close: bool = False
 
     def __init__(
@@ -66,7 +66,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         self.await_ = adapt_connection.await_
         self._rows: deque[t.Any] = deque()
         self._cursor = None
-        self._description: t.Optional[t.List[t.Tuple[t.Any, ...]]] = None
+        self._description: list[tuple[t.Any, ...]] | None = None
         self._arraysize = 1
         self._rowcount = -1
         self._invalidate_schema_cache_asof = 0
@@ -74,9 +74,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     async def _prepare_execute(
         self,
         querystring: str,
-        parameters: t.Union[
-            t.Sequence[t.Any], t.Mapping[str, Any], None
-        ] = None,
+        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> None:
         """Execute a prepared statement.
 
@@ -175,10 +173,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
     def _process_parameters(
         self,
-        parameters: t.Union[
-            t.Sequence[t.Any], t.Mapping[str, Any], None
-        ] = None,
-    ) -> t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]:
+        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
+    ) -> t.Sequence[t.Any] | t.Mapping[str, Any] | None:
         """Process parameters for type conversion.
 
         Converts UUID objects to bytes format required by psqlpy.
@@ -209,7 +205,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             return {
                 key: process_value(value) for key, value in parameters.items()
             }
-        if isinstance(parameters, (list, tuple)):
+        if isinstance(parameters, list | tuple):
             return type(parameters)(
                 process_value(value) for value in parameters
             )
@@ -218,10 +214,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     def _convert_named_params_with_casting(
         self,
         querystring: str,
-        parameters: t.Union[
-            t.Sequence[t.Any], t.Mapping[str, Any], None
-        ] = None,
-    ) -> t.Tuple[str, t.Union[t.Sequence[t.Any], t.Mapping[str, Any], None]]:
+        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
+    ) -> tuple[str, t.Sequence[t.Any] | t.Mapping[str, Any] | None]:
         """Convert named parameters with PostgreSQL casting syntax to positional parameters.
 
         Transforms queries like:
@@ -326,7 +320,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         return converted_query, converted_params
 
     @property
-    def description(self) -> "Optional[_DBAPICursorDescription]":
+    def description(self) -> "_DBAPICursorDescription | None":
         return self._description
 
     @property
@@ -387,7 +381,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         # Process all parameters first
         if seq_of_parameters and all(
-            isinstance(p, (list, tuple)) for p in seq_of_parameters
+            isinstance(p, list | tuple) for p in seq_of_parameters
         ):
             converted_seq = [list(p) for p in seq_of_parameters]
         else:
@@ -398,7 +392,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                     converted_seq.append([])
                 elif isinstance(processed, dict):
                     converted_seq.append(list(processed.values()))
-                elif isinstance(processed, (list, tuple)):
+                elif isinstance(processed, list | tuple):
                     converted_seq.append(list(processed))
                 else:
                     converted_seq.append([processed])
@@ -458,7 +452,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if adapt_connection._transaction is not None:
             try:
                 # Build queries list for pipeline: [(query, params), ...]
-                queries: t.List[t.Tuple[str, t.Optional[t.List[t.Any]]]] = [
+                queries: list[tuple[str, list[t.Any] | None]] = [
                     (operation, params) for params in converted_seq
                 ]
                 await adapt_connection._transaction.pipeline(
@@ -479,9 +473,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
     def execute(
         self,
         operation: t.Any,
-        parameters: t.Union[
-            t.Sequence[t.Any], t.Mapping[str, Any], None
-        ] = None,
+        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> None:
         self.await_(self._prepare_execute(operation, parameters))
 
@@ -500,7 +492,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
 ):
     """Server-side cursor implementation for psqlpy."""
 
-    _cursor: t.Optional[psqlpy.Cursor]  # type: ignore[assignment]
+    _cursor: psqlpy.Cursor | None  # type: ignore[assignment]
 
     def __init__(
         self, adapt_connection: "AsyncAdapt_psqlpy_connection"
@@ -514,7 +506,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
     def _convert_result(
         self,
         result: psqlpy.QueryResult,
-    ) -> Tuple[Tuple[Any, ...], ...]:
+    ) -> tuple[tuple[Any, ...], ...]:
         """Convert psqlpy QueryResult to tuple of tuples."""
         if result is None:
             return ()
@@ -540,7 +532,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
                 self._cursor = None
                 self._closed = True
 
-    def fetchone(self) -> Optional[Tuple[Any, ...]]:
+    def fetchone(self) -> tuple[Any, ...] | None:
         """Fetch the next row from the cursor."""
         if self._closed or self._cursor is None:
             return None
@@ -552,7 +544,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return None
 
-    def fetchmany(self, size: Optional[int] = None) -> t.List[Tuple[Any, ...]]:
+    def fetchmany(self, size: int | None = None) -> list[tuple[Any, ...]]:
         """Fetch the next set of rows from the cursor."""
         if self._closed or self._cursor is None:
             return []
@@ -565,7 +557,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return []
 
-    def fetchall(self) -> t.List[Tuple[Any, ...]]:
+    def fetchall(self) -> list[tuple[Any, ...]]:
         """Fetch all remaining rows from the cursor."""
         if self._closed or self._cursor is None:
             return []
@@ -576,7 +568,7 @@ class AsyncAdapt_psqlpy_ss_cursor(
         except Exception:
             return []
 
-    def __iter__(self) -> t.Iterator[Tuple[Any, ...]]:
+    def __iter__(self) -> t.Iterator[tuple[Any, ...]]:
         if self._closed or self._cursor is None:
             return
 
@@ -596,7 +588,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
     _ss_cursor_cls = AsyncAdapt_psqlpy_ss_cursor  # type: ignore[assignment]
 
     _connection: psqlpy.Connection  # type: ignore[assignment]
-    _transaction: t.Optional[psqlpy.Transaction]
+    _transaction: psqlpy.Transaction | None
 
     __slots__ = (
         "_invalidate_schema_cache_asof",
@@ -637,7 +629,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         # LRU cache for prepared statements. Defaults to 100 statements per
         # connection. The cache is on a per-connection basis, stored within
         # connections pooled by the connection pool.
-        self._prepared_statement_cache: t.Optional[util.LRUCache[t.Any, t.Any]]
+        self._prepared_statement_cache: util.LRUCache[t.Any, t.Any] | None
         if prepared_statement_cache_size > 0:
             self._prepared_statement_cache = util.LRUCache(
                 prepared_statement_cache_size
@@ -649,7 +641,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._prepared_statement_name_func = self._default_name_func
 
         # Legacy query cache (kept for compatibility)
-        self._query_cache: t.Dict[str, t.Any] = {}
+        self._query_cache: dict[str, t.Any] = {}
         self._cache_max_size = prepared_statement_cache_size
 
     async def _check_type_cache_invalidation(
@@ -739,7 +731,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
             self._connection_valid = False
             return False
 
-    def _get_cached_query(self, query_key: str) -> t.Optional[t.Any]:
+    def _get_cached_query(self, query_key: str) -> t.Any | None:
         """Get a cached prepared statement if available."""
         return self._query_cache.get(query_key)
 
@@ -761,7 +753,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
 
     def cursor(
         self, server_side: bool = False
-    ) -> Union[AsyncAdapt_psqlpy_cursor, AsyncAdapt_psqlpy_ss_cursor]:
+    ) -> AsyncAdapt_psqlpy_cursor | AsyncAdapt_psqlpy_ss_cursor:
         if server_side:
             return self._ss_cursor_cls(self)
         return self._cursor_cls(self)

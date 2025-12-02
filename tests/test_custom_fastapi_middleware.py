@@ -7,7 +7,6 @@ Tests the custom middleware implementation provided in the issue description.
 import asyncio
 import unittest
 from contextvars import ContextVar
-from typing import Dict, Optional, Union
 
 try:
     from fastapi import FastAPI
@@ -82,8 +81,8 @@ class SessionNotInitialisedError(Exception):
 
 def create_middleware_and_session_proxy():
     """Create the custom middleware and session proxy as provided in the issue."""
-    _Session: Optional[async_sessionmaker] = None
-    _session: ContextVar[Optional[AsyncSession]] = ContextVar(
+    _Session: async_sessionmaker | None = None
+    _session: ContextVar[AsyncSession | None] = ContextVar(
         "_session", default=None
     )
     _multi_sessions_ctx: ContextVar[bool] = ContextVar(
@@ -97,10 +96,10 @@ def create_middleware_and_session_proxy():
         def __init__(
             self,
             app: ASGIApp,
-            db_url: Optional[Union[str, URL]] = None,
-            custom_engine: Optional[Engine] = None,
-            engine_args: Dict = None,
-            session_args: Dict = None,
+            db_url: str | URL | None = None,
+            custom_engine: Engine | None = None,
+            engine_args: dict = None,
+            session_args: dict = None,
             commit_on_exit: bool = False,
         ):
             super().__init__(app)
@@ -168,7 +167,7 @@ def create_middleware_and_session_proxy():
     class DBSession(metaclass=DBSessionMeta):
         def __init__(
             self,
-            session_args: Dict = None,
+            session_args: dict = None,
             commit_on_exit: bool = False,
             multi_sessions: bool = False,
         ):
