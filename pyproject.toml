@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psqlpy-sqlalchemy"
-version = "0.1.1b1"
+version = "0.1.1b2"
 description = "SQLAlchemy dialect for psqlpy PostgreSQL driver"
 readme = "README.md"
 license = {text = "MIT"}

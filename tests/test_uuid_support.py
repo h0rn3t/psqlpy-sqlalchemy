@@ -10,7 +10,7 @@ from sqlalchemy import Column, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
 # Skip tests if database is not available (check for CI environment or explicit flag)
@@ -356,6 +356,60 @@ class TestUUIDParameterBinding:
         # Verify UUID field is uuid.UUID object
         assert isinstance(row.uid, uuid.UUID)
         assert row.uid == test_uuid
+
+    async def test_uuid_mapped_annotation_without_explicit_as_uuid(
+        self, engine
+    ):
+        """Test that Mapped[uuid.UUID] without explicit UUID(as_uuid=True) returns uuid.UUID objects.
+
+        This test verifies the exact pattern:
+        id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+
+        When using SQLAlchemy 2.0+ Mapped annotations with Python's uuid.UUID type,
+        the dialect should automatically return uuid.UUID objects, not strings.
+        """
+        from sqlalchemy import select
+
+        # Create a model using the Mapped[uuid.UUID] annotation pattern
+        class SimplifiedUUIDModel(Base):
+            __tablename__ = "test_simplified_uuid"
+
+            id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+            name: Mapped[str] = mapped_column(String(100))
+
+        # Create table
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                SimplifiedUUIDModel.__table__.create, checkfirst=True
+            )
+
+        try:
+            # Create session
+            async_session = sessionmaker(engine, class_=AsyncSession)
+            async with async_session() as session:
+                # Insert test data
+                test_uuid = uuid.uuid4()
+                obj = SimplifiedUUIDModel(id=test_uuid, name="test")
+                session.add(obj)
+                await session.commit()
+
+                # Select using the exact pattern from the issue
+                stmt = select(SimplifiedUUIDModel.id)
+                result = (await session.scalars(stmt)).all()
+
+                # Critical assertion: should be uuid.UUID, not str
+                assert len(result) == 1
+                assert isinstance(result[0], uuid.UUID), (
+                    f"Expected uuid.UUID but got {type(result[0]).__name__}. "
+                    f"This means the Mapped[UUID] pattern is returning strings instead of UUID objects."
+                )
+                assert result[0] == test_uuid
+        finally:
+            # Clean up
+            async with engine.begin() as conn:
+                await conn.run_sync(
+                    SimplifiedUUIDModel.__table__.drop, checkfirst=True
+                )
 
 
 class TestUUIDTypeCompatibility:
