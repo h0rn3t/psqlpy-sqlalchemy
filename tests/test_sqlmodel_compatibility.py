@@ -4,7 +4,6 @@ Tests for SQLModel compatibility with psqlpy-sqlalchemy dialect
 """
 
 import unittest
-from typing import Optional
 
 from sqlalchemy import create_engine
 from sqlmodel import Field, Session, SQLModel, select
@@ -13,10 +12,10 @@ from sqlmodel import Field, Session, SQLModel, select
 class Hero(SQLModel, table=True):
     """Test model for SQLModel compatibility tests"""
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str
     secret_name: str
-    age: Optional[int] = None
+    age: int | None = None
 
 
 class TestSQLModelCompatibility(unittest.TestCase):
@@ -120,16 +119,16 @@ class TestSQLModelCompatibility(unittest.TestCase):
         """Test SQLModel relationship handling"""
 
         class Team(SQLModel, table=True):
-            id: Optional[int] = Field(default=None, primary_key=True)
+            id: int | None = Field(default=None, primary_key=True)
             name: str
             headquarters: str
 
         class HeroWithTeam(SQLModel, table=True):
-            id: Optional[int] = Field(default=None, primary_key=True)
+            id: int | None = Field(default=None, primary_key=True)
             name: str
             secret_name: str
-            age: Optional[int] = None
-            team_id: Optional[int] = Field(default=None, foreign_key="team.id")
+            age: int | None = None
+            team_id: int | None = Field(default=None, foreign_key="team.id")
 
         # Create tables for these models
         Team.metadata.create_all(self.engine)
