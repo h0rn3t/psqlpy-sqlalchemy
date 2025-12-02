@@ -306,6 +306,57 @@ class TestUUIDParameterBinding:
             count = result.fetchone().count
             assert count == len(test_cases)
 
+    async def test_uuid_select_returns_uuid_objects(self, session):
+        """Test that SELECT returns uuid.UUID objects, not strings.
+
+        This is a regression test for the issue where UUID values were
+        returned as strings instead of uuid.UUID objects.
+        """
+        from sqlalchemy import select
+
+        test_uuid = uuid.uuid4()
+
+        # Insert test data
+        obj = UUIDTable(uid=test_uuid, name="test_select_type")
+        session.add(obj)
+        await session.commit()
+
+        # Select UUID column using ORM
+        stmt = select(UUIDTable.uid)
+        result = (await session.scalars(stmt)).all()
+
+        # Verify result type
+        assert len(result) == 1
+        retrieved_uuid = result[0]
+
+        # Critical assertion: UUID should be returned as uuid.UUID object, not string
+        assert isinstance(retrieved_uuid, uuid.UUID), (
+            f"Expected uuid.UUID but got {type(retrieved_uuid).__name__}"
+        )
+        assert retrieved_uuid == test_uuid
+
+    async def test_uuid_select_full_row(self, session):
+        """Test that SELECT * returns uuid.UUID objects in full row results."""
+        from sqlalchemy import select
+
+        test_uuid = uuid.uuid4()
+
+        # Insert test data
+        obj = UUIDTable(uid=test_uuid, name="test_full_row")
+        session.add(obj)
+        await session.commit()
+
+        # Select full row
+        stmt = select(UUIDTable)
+        result = (await session.scalars(stmt)).all()
+
+        assert len(result) == 1
+        row = result[0]
+
+        # Verify UUID field is uuid.UUID object
+        assert isinstance(row.uid, uuid.UUID)
+        assert row.uid == test_uuid
+
 
 class TestUUIDTypeCompatibility:
     """Test UUID type compatibility with existing functionality."""

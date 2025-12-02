@@ -256,6 +256,33 @@ class _PGUUID(UUID[t.Any]):
 
         return process
 
+    def result_processor(
+        self, dialect: t.Any, coltype: t.Any
+    ) -> t.Optional[t.Callable[[t.Any], t.Any]]:
+        """Process UUID results from psqlpy.
+
+        Converts string UUID values returned by psqlpy to Python uuid.UUID objects
+        when as_uuid=True (which is the default in SQLAlchemy 2.0+).
+        """
+        if self.as_uuid:
+
+            def process(value: t.Any) -> t.Optional[uuid.UUID]:
+                if value is None:
+                    return None
+                if isinstance(value, uuid.UUID):
+                    return value
+                if isinstance(value, str):
+                    # psqlpy returns UUID as string, convert to uuid.UUID
+                    return uuid.UUID(value)
+                if isinstance(value, bytes):
+                    # Handle bytes representation
+                    return uuid.UUID(bytes=value)
+                # For other types, try to convert
+                return uuid.UUID(str(value))
+
+            return process
+        return None
+
 
 class PSQLPyAsyncDialect(PGDialect):
     driver = "psqlpy"
