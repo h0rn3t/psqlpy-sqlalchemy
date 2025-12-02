@@ -150,9 +150,10 @@ class TestPSQLPyAdaptDBAPI(unittest.TestCase):
 
     def test_server_settings_handling(self):
         """Test server_settings parameter handling"""
-        with patch(
-            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
-        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+        with (
+            patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"),
+            patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only,
+        ):
             mock_connection = Mock()
             mock_await_only.return_value = mock_connection
 
@@ -188,9 +189,10 @@ class TestPSQLPyAdaptDBAPI(unittest.TestCase):
 
     def test_server_settings_without_application_name(self):
         """Test server_settings parameter handling without application_name"""
-        with patch(
-            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
-        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+        with (
+            patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"),
+            patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only,
+        ):
             mock_connection = Mock()
             mock_await_only.return_value = mock_connection
 
@@ -210,9 +212,10 @@ class TestPSQLPyAdaptDBAPI(unittest.TestCase):
 
     def test_connect_without_server_settings(self):
         """Test connect method without server_settings"""
-        with patch(
-            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
-        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+        with (
+            patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"),
+            patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only,
+        ):
             mock_connection = Mock()
             mock_await_only.return_value = mock_connection
 
@@ -226,9 +229,10 @@ class TestPSQLPyAdaptDBAPI(unittest.TestCase):
 
     def test_parameter_filtering(self):
         """Test that unsupported parameters are filtered out"""
-        with patch(
-            "psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"
-        ), patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only:
+        with (
+            patch("psqlpy_sqlalchemy.dbapi.AsyncAdapt_psqlpy_connection"),
+            patch("psqlpy_sqlalchemy.dbapi.await_only") as mock_await_only,
+        ):
             mock_connection = Mock()
             mock_await_only.return_value = mock_connection
 

@@ -7,9 +7,7 @@ This script benchmarks various database operations to measure performance improv
 
 import asyncio
 import time
-import typing as t
 from statistics import mean, median, stdev
-from typing import Dict, List
 
 from sqlalchemy import (
     Integer,
@@ -36,7 +34,7 @@ class TestModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[t.Optional[str]] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     value: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -45,13 +43,13 @@ class BenchmarkResult:
 
     def __init__(self, name: str):
         self.name = name
-        self.times: List[float] = []
+        self.times: list[float] = []
 
     def add_time(self, duration: float) -> None:
         """Add a timing measurement."""
         self.times.append(duration)
 
-    def get_stats(self) -> Dict[str, float]:
+    def get_stats(self) -> dict[str, float]:
         """Calculate statistics for the benchmark."""
         if not self.times:
             return {"mean": 0, "median": 0, "stdev": 0, "min": 0, "max": 0}
@@ -298,7 +296,7 @@ async def benchmark_transaction(
 
 async def run_benchmarks(
     url: str, dialect_name: str
-) -> Dict[str, BenchmarkResult]:
+) -> dict[str, BenchmarkResult]:
     """Run all benchmarks for a specific dialect."""
     print(f"\n{'=' * 60}")
     print(f"Running benchmarks for {dialect_name}")
@@ -338,8 +336,8 @@ async def run_benchmarks(
 
 
 def print_comparison(
-    psqlpy_results: Dict[str, BenchmarkResult],
-    asyncpg_results: Dict[str, BenchmarkResult],
+    psqlpy_results: dict[str, BenchmarkResult],
+    asyncpg_results: dict[str, BenchmarkResult],
 ) -> None:
     """Print comparison of results."""
     print(f"\n{'=' * 60}")

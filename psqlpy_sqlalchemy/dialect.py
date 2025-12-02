@@ -1,7 +1,8 @@
 import typing as t
 import uuid
+from collections.abc import MutableMapping, Sequence
 from types import ModuleType
-from typing import Any, Dict, MutableMapping, Sequence, Tuple
+from typing import Any
 
 import psqlpy
 from sqlalchemy import URL, util
@@ -28,8 +29,8 @@ class CompatibleNullPool(NullPool):
     def __init__(
         self,
         creator: t.Any,
-        pool_size: t.Optional[int] = None,
-        max_overflow: t.Optional[int] = None,
+        pool_size: int | None = None,
+        max_overflow: int | None = None,
         **kw: t.Any,
     ) -> None:
         # Filter out pool sizing arguments that NullPool doesn't accept
@@ -231,10 +232,10 @@ class _PGUUID(UUID[t.Any]):
 
     def bind_processor(
         self, dialect: t.Any
-    ) -> t.Optional[t.Callable[[t.Any], t.Any]]:
+    ) -> t.Callable[[t.Any], t.Any] | None:
         """Process UUID parameters for psqlpy compatibility."""
 
-        def process(value: t.Any) -> t.Optional[bytes]:
+        def process(value: t.Any) -> bytes | None:
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
@@ -255,6 +256,33 @@ class _PGUUID(UUID[t.Any]):
                 raise ValueError(f"Cannot convert {value!r} to UUID")
 
         return process
+
+    def result_processor(
+        self, dialect: t.Any, coltype: t.Any
+    ) -> t.Callable[[t.Any], t.Any] | None:
+        """Process UUID results from psqlpy.
+
+        Converts string UUID values returned by psqlpy to Python uuid.UUID objects
+        when as_uuid=True (which is the default in SQLAlchemy 2.0+).
+        """
+        if self.as_uuid:
+
+            def process(value: t.Any) -> uuid.UUID | None:
+                if value is None:
+                    return None
+                if isinstance(value, uuid.UUID):
+                    return value
+                if isinstance(value, str):
+                    # psqlpy returns UUID as string, convert to uuid.UUID
+                    return uuid.UUID(value)
+                if isinstance(value, bytes):
+                    # Handle bytes representation
+                    return uuid.UUID(bytes=value)
+                # For other types, try to convert
+                return uuid.UUID(str(value))
+
+            return process
+        return None
 
 
 class PSQLPyAsyncDialect(PGDialect):
@@ -314,7 +342,7 @@ class PSQLPyAsyncDialect(PGDialect):
         return t.cast(ModuleType, PSQLPyAdaptDBAPI(__import__("psqlpy")))
 
     @util.memoized_property
-    def _isolation_lookup(self) -> Dict[str, Any]:
+    def _isolation_lookup(self) -> dict[str, Any]:
         """Mapping of SQLAlchemy isolation levels to psqlpy isolation levels"""
         return {
             "READ_COMMITTED": psqlpy.IsolationLevel.ReadCommitted,
@@ -325,7 +353,7 @@ class PSQLPyAsyncDialect(PGDialect):
     def create_connect_args(
         self,
         url: URL,
-    ) -> Tuple[Sequence[str], MutableMapping[str, Any]]:
+    ) -> tuple[Sequence[str], MutableMapping[str, Any]]:
         opts = url.translate_connect_args()
         return (
             [],

@@ -155,7 +155,7 @@ class PsqlpyDBAPI:
 
         return datetime.datetime.fromtimestamp(ticks)
 
-    def Binary(self, string: t.Union[str, bytes]) -> bytes:
+    def Binary(self, string: str | bytes) -> bytes:
         """Construct a binary value"""
         if isinstance(string, str):
             return string.encode("utf-8")
