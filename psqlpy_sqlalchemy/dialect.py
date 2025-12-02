@@ -331,6 +331,7 @@ class PSQLPyAsyncDialect(PGDialect):
             sqltypes.SmallInteger: _PGSmallInteger,
             sqltypes.BigInteger: _PGBigInteger,
             sqltypes.Boolean: _PGBoolean,
+            sqltypes.Uuid: _PGUUID,  # Uuid type (lowercase) inferred from Mapped[uuid.UUID]
             UUID: _PGUUID,  # UUID support with proper parameter binding
             # Note: NullType mapping removed - standard PostgreSQL dialect doesn't map it
             # and mapping it with render_bind_cast=True causes DDL compilation errors
