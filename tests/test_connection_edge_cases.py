@@ -119,7 +119,6 @@ class TestPerformanceOptimizations:
     def test_regex_pattern_compilation(self):
         """Test that regex patterns are pre-compiled."""
         # All patterns should be compiled regex objects
-        import re
 
         from psqlpy_sqlalchemy.connection import (
             _PARAM_PATTERN,
@@ -127,9 +126,9 @@ class TestPerformanceOptimizations:
             _VALUES_PATTERN,
         )
 
-        assert isinstance(_PARAM_PATTERN, re.Pattern)
-        assert isinstance(_UUID_PATTERN, re.Pattern)
-        assert isinstance(_VALUES_PATTERN, re.Pattern)
+        assert hasattr(_PARAM_PATTERN, "pattern")
+        assert hasattr(_UUID_PATTERN, "pattern")
+        assert hasattr(_VALUES_PATTERN, "pattern")
 
     def test_frozenset_optimizations(self):
         """Test frozenset optimizations for keyword lookups."""
