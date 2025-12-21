@@ -671,16 +671,16 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
 
-    @patch("psqlpy_sqlalchemy.connection.await_only")
-    def test_rollback_without_transaction(self, mock_await_only):
-        """Test rollback without active transaction"""
+    def test_rollback_without_transaction(self):
+        """Test rollback without active transaction - should be no-op"""
         self.connection._transaction = None
+        self.connection._started = True
 
         self.connection.rollback()
 
-        mock_await_only.assert_called_once_with(
-            self.mock_connection.rollback()
-        )
+        # Without transaction, rollback should be a no-op
+        self.assertIsNone(self.connection._transaction)
+        self.assertFalse(self.connection._started)
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_rollback_with_exception(self, mock_await_only):
@@ -709,14 +709,16 @@ class TestAsyncAdaptPsqlpyConnection(unittest.TestCase):
         self.assertIsNone(self.connection._transaction)
         self.assertFalse(self.connection._started)
 
-    @patch("psqlpy_sqlalchemy.connection.await_only")
-    def test_commit_without_transaction(self, mock_await_only):
-        """Test commit without active transaction"""
+    def test_commit_without_transaction(self):
+        """Test commit without active transaction - should be no-op"""
         self.connection._transaction = None
+        self.connection._started = True
 
         self.connection.commit()
 
-        mock_await_only.assert_called_once_with(self.mock_connection.commit())
+        # Without transaction, commit should be a no-op
+        self.assertIsNone(self.connection._transaction)
+        self.assertFalse(self.connection._started)
 
     @patch("psqlpy_sqlalchemy.connection.await_only")
     def test_commit_with_exception(self, mock_await_only):
