@@ -1,10 +1,12 @@
 import asyncio
 import re
+import sys
 import time
 import typing as t
 import uuid
 from collections import deque
-from typing import Any
+from functools import lru_cache
+from typing import Any, Final
 
 import psqlpy
 from psqlpy import row_factories
@@ -17,18 +19,62 @@ from sqlalchemy.connectors.asyncio import (
 from sqlalchemy.dialects.postgresql.base import PGExecutionContext
 from sqlalchemy.util.concurrency import await_only
 
-# Compiled regex patterns used for parameter substitution
-_PARAM_PATTERN = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?")
-_POSITIONAL_CHECK = re.compile(r"\$\d+:$")
+# Python version for conditional optimizations
+_PY_VERSION = sys.version_info[:2]
 
-# UUID pattern for validation
-_UUID_PATTERN = re.compile(
+# Compiled regex patterns - use Final for JIT optimization (3.13+)
+_PARAM_PATTERN: Final = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?")
+_POSITIONAL_CHECK: Final = re.compile(r"\$\d+:$")
+_UUID_PATTERN: Final = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+_VALUES_PATTERN: Final = re.compile(r"VALUES\s*\([^)]*\)", re.IGNORECASE)
 
-# Cache for compiled parameter-specific regex patterns
-_PARAM_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+# DML keywords as frozenset for O(1) lookup
+_DML_KEYWORDS: Final[frozenset[str]] = frozenset(
+    ("INSERT", "UPDATE", "DELETE")
+)
+
+# Pre-compute UUID class for faster comparison
+_UUID_CLASS: Final = uuid.UUID
+
+
+@lru_cache(maxsize=256)
+def _get_param_regex(name: str) -> re.Pattern[str]:
+    """Cached regex pattern for parameter substitution."""
+    return re.compile(rf":({re.escape(name)})(::[\w\[\]]+)?")
+
+
+# Python 3.11+: direct class comparison is faster than isinstance
+# Python 3.12+: comprehensions are inlined (PEP 709) - automatic optimization
+# Python 3.13+: JIT compiler can optimize hot paths
+if _PY_VERSION >= (3, 11):
+
+    def _convert_uuid(val: t.Any) -> t.Any:
+        return val.bytes if val.__class__ is _UUID_CLASS else val
+else:
+
+    def _convert_uuid(val: t.Any) -> t.Any:
+        return val.bytes if isinstance(val, uuid.UUID) else val
+
+
+# Optimized string operations for 3.12+
+if _PY_VERSION >= (3, 12):
+
+    def _check_dml(query: str) -> tuple[bool, str]:
+        """Check if query is DML and return uppercase version."""
+        q_upper = query.upper()
+        start = q_upper.lstrip()[:6]
+        return start in _DML_KEYWORDS and "RETURNING" not in q_upper, q_upper
+else:
+
+    def _check_dml(query: str) -> tuple[bool, str]:
+        q_upper = query.upper()
+        start = q_upper.lstrip()[:6]
+        is_dml = start in _DML_KEYWORDS and "RETURNING" not in q_upper
+        return is_dml, q_upper
+
 
 if t.TYPE_CHECKING:
     from sqlalchemy.engine.interfaces import (
@@ -82,18 +128,14 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if not self._adapt_connection._started:
             await self._adapt_connection._start_transaction()
 
-        # Convert params
         converted_query, converted_params = self._convert_params_single_pass(
             querystring, parameters
         )
 
         try:
             # DML without RETURNING: use execute() directly
-            query_upper = converted_query.upper()
-            if (
-                query_upper.lstrip()[:6] in ("INSERT", "UPDATE", "DELETE")
-                and "RETURNING" not in query_upper
-            ):
+            is_dml, _ = _check_dml(converted_query)
+            if is_dml:
                 await self._connection.execute(
                     converted_query, converted_params, prepared=True
                 )
@@ -114,18 +156,19 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             ]
 
             if self.server_side:
-                self._cursor = self._connection.cursor(  # type: ignore[assignment]
+                self._cursor = self._connection.cursor(
                     converted_query,
                     converted_params,
                 )
-                await self._cursor.start()  # type: ignore[attr-defined]
+                await self._cursor.start()
                 self._rowcount = -1
                 return
 
             results = await prepared_stmt.execute()
 
+            # Use tuple unpacking directly - faster in Python 3.11+
             self._rows = deque(
-                tuple(value for _, value in row)
+                tuple(v for _, v in row)
                 for row in results.row_factory(row_factories.tuple_row)
             )
             self._rowcount = len(self._rows)
@@ -141,24 +184,19 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         self,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> t.Sequence[t.Any] | t.Mapping[str, Any] | None:
-        """Process parameters for type conversion (legacy, used by executemany).
-
-        Converts UUID objects to bytes format required by psqlpy.
-        """
+        """Process parameters for type conversion (legacy)."""
         if parameters is None:
             return None
 
-        def process_value(value: Any) -> Any:
-            if value is None:
-                return None
-            if isinstance(value, uuid.UUID):
-                return value.bytes
-            if isinstance(value, str) and _UUID_PATTERN.match(value):
+        def process_value(val: Any) -> Any:
+            if val.__class__ is uuid.UUID:
+                return val.bytes
+            if isinstance(val, str) and _UUID_PATTERN.match(val):
                 try:
-                    return uuid.UUID(value).bytes
+                    return uuid.UUID(val).bytes
                 except ValueError:
-                    return value
-            return value
+                    return val
+            return val
 
         if isinstance(parameters, dict):
             return {k: process_value(v) for k, v in parameters.items()}
@@ -171,29 +209,13 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         querystring: str,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> tuple[str, list[Any] | None]:
-        """Single-pass conversion: named→positional + UUID→bytes.
-
-        Optimized to avoid multiple iterations over parameters.
-        """
-        # Fast path: no parameters
+        """Single-pass conversion: named→positional + UUID→bytes."""
         if parameters is None:
             return querystring, None
 
         # Fast path: already positional (list/tuple)
         if isinstance(parameters, list | tuple):
-            # Just process UUIDs
-            converted: list[Any] = []
-            for val in parameters:
-                if isinstance(val, uuid.UUID):
-                    converted.append(val.bytes)
-                elif isinstance(val, str) and _UUID_PATTERN.match(val):
-                    try:
-                        converted.append(uuid.UUID(val).bytes)
-                    except ValueError:
-                        converted.append(val)
-                else:
-                    converted.append(val)
-            return querystring, converted
+            return querystring, [_convert_uuid(v) for v in parameters]
 
         # Dict parameters: need named→positional conversion
         if not isinstance(parameters, dict):
@@ -201,52 +223,34 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         # Fast path: no named params in query
         if ":" not in querystring:
-            return querystring, list(parameters.values())
+            return querystring, [_convert_uuid(v) for v in parameters.values()]
 
         # Find all parameter references
-        matches = list(_PARAM_PATTERN.finditer(querystring))
+        matches = _PARAM_PATTERN.findall(querystring)
         if not matches:
-            return querystring, list(parameters.values())
+            return querystring, [_convert_uuid(v) for v in parameters.values()]
 
         # Build param order (first occurrence wins)
         param_order: list[str] = []
         seen: set[str] = set()
-        for match in matches:
-            name = match.group(1)
+        for name, _ in matches:
             if name not in seen and name in parameters:
                 param_order.append(name)
                 seen.add(name)
 
-        # Check for missing params - return original if any missing
-        for match in matches:
-            name = match.group(1)
+        # Check for missing params
+        for name, _ in matches:
             if name not in parameters:
-                # Missing param - return original query and values as list
                 return querystring, list(parameters.values())
 
-        # Single loop: build converted params + query replacement
-        converted_params: list[Any] = []
+        # Build converted params + query replacement
+        converted_params = [
+            _convert_uuid(parameters[name]) for name in param_order
+        ]
+
         converted_query = querystring
-
         for i, name in enumerate(param_order, 1):
-            val = parameters[name]
-            # UUID conversion inline
-            if isinstance(val, uuid.UUID):
-                converted_params.append(val.bytes)
-            elif isinstance(val, str) and _UUID_PATTERN.match(val):
-                try:
-                    converted_params.append(uuid.UUID(val).bytes)
-                except ValueError:
-                    converted_params.append(val)
-            else:
-                converted_params.append(val)
-
-            # Get or create cached regex for this param
-            if name not in _PARAM_REGEX_CACHE:
-                _PARAM_REGEX_CACHE[name] = re.compile(
-                    rf":({re.escape(name)})(::[\w\[\]]+)?"
-                )
-            converted_query = _PARAM_REGEX_CACHE[name].sub(
+            converted_query = _get_param_regex(name).sub(
                 f"${i}\\2", converted_query
             )
 
@@ -257,49 +261,32 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         querystring: str,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> tuple[str, t.Sequence[t.Any] | t.Mapping[str, Any] | None]:
-        """Convert named parameters to positional (without UUID conversion).
-
-        Legacy method for backward compatibility.
-        """
-        # Fast path: no parameters or not a dict
+        """Convert named parameters to positional (without UUID conversion)."""
         if parameters is None or not isinstance(parameters, dict):
             return querystring, parameters
 
-        # Fast path: no named params in query
         if ":" not in querystring:
             return querystring, parameters
 
-        # Find all parameter references
-        matches = list(_PARAM_PATTERN.finditer(querystring))
+        matches = _PARAM_PATTERN.findall(querystring)
         if not matches:
             return querystring, parameters
 
-        # Build param order (first occurrence wins)
         param_order: list[str] = []
         seen: set[str] = set()
-        for match in matches:
-            name = match.group(1)
+        for name, _ in matches:
             if name not in seen and name in parameters:
                 param_order.append(name)
                 seen.add(name)
 
-        # Check for missing params
-        for match in matches:
-            name = match.group(1)
+        for name, _ in matches:
             if name not in parameters:
                 return querystring, parameters
 
-        # Build converted params + query
-        converted_params: list[Any] = []
+        converted_params = [parameters[name] for name in param_order]
         converted_query = querystring
-
         for i, name in enumerate(param_order, 1):
-            converted_params.append(parameters[name])
-            if name not in _PARAM_REGEX_CACHE:
-                _PARAM_REGEX_CACHE[name] = re.compile(
-                    rf":({re.escape(name)})(::[\w\[\]]+)?"
-                )
-            converted_query = _PARAM_REGEX_CACHE[name].sub(
+            converted_query = _get_param_regex(name).sub(
                 f"${i}\\2", converted_query
             )
 
@@ -330,21 +317,18 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         if not self._adapt_connection._started:
             await self._adapt_connection._start_transaction()
 
-        # Fast conversion
-        def convert_row(params: Any) -> list[Any]:
-            if params is None:
-                return []
-            vals = params.values() if isinstance(params, dict) else params
-            return [v.bytes if isinstance(v, uuid.UUID) else v for v in vals]
-
-        converted_seq = [convert_row(p) for p in seq_of_parameters]
+        # Fast conversion using comprehension (inlined in 3.12+)
+        converted_seq = [
+            [
+                _convert_uuid(v)
+                for v in (p.values() if isinstance(p, dict) else p or [])
+            ]
+            for p in seq_of_parameters
+        ]
 
         # INSERT: multi-value optimization
-        if (
-            len(converted_seq) > 1
-            and operation.lstrip()[:6].upper() == "INSERT"
-            and "RETURNING" not in operation.upper()
-        ):
+        is_dml, q_upper = _check_dml(operation)
+        if len(converted_seq) > 1 and q_upper.lstrip().startswith("INSERT"):
             try:
                 idx = 1
                 parts = []
@@ -357,11 +341,8 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                     flat.extend(row)
                     idx += n
 
-                query = re.sub(
-                    r"VALUES\s*\([^)]*\)",
-                    f"VALUES {', '.join(parts)}",
-                    operation,
-                    flags=re.IGNORECASE,
+                query = _VALUES_PATTERN.sub(
+                    f"VALUES {', '.join(parts)}", operation
                 )
                 await self._connection.execute(query, flat)
                 self._rowcount = len(converted_seq)
