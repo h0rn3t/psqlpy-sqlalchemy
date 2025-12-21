@@ -81,9 +81,9 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         result = self.cursor._process_parameters(params)
 
         self.assertIsInstance(result, dict)
-        self.assertEqual(result["id"], test_uuid.bytes)
+        self.assertEqual(result["id"], str(test_uuid))
         self.assertEqual(result["name"], "test")
-        self.assertEqual(result["uuid_str"], test_uuid.bytes)
+        self.assertEqual(result["uuid_str"], str(test_uuid))
         self.assertIsNone(result["null_val"])
 
     def test_process_parameters_list(self):
@@ -94,9 +94,9 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         result = self.cursor._process_parameters(params)
 
         self.assertIsInstance(result, list)
-        self.assertEqual(result[0], test_uuid.bytes)
+        self.assertEqual(result[0], str(test_uuid))
         self.assertEqual(result[1], "test")
-        self.assertEqual(result[2], test_uuid.bytes)
+        self.assertEqual(result[2], str(test_uuid))
         self.assertIsNone(result[3])
 
     def test_process_parameters_invalid_uuid_string(self):
@@ -242,7 +242,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
 
         # Test with UUID
         result = self.cursor._process_parameters(test_uuid)
-        self.assertEqual(result, test_uuid.bytes)
+        self.assertEqual(result, str(test_uuid))
 
         # Test with string
         result = self.cursor._process_parameters("test_string")

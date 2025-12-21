@@ -22,7 +22,7 @@ class TestUtilityFunctions:
         """Test UUID conversion with actual UUID object."""
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == test_uuid.bytes
+        assert result == str(test_uuid)
 
     def test_convert_uuid_with_non_uuid(self):
         """Test UUID conversion with non-UUID object."""
@@ -101,7 +101,7 @@ class TestPythonVersionOptimizations:
 
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == test_uuid.bytes
+        assert result == str(test_uuid)
 
     @patch("psqlpy_sqlalchemy.connection._PY_VERSION", (3, 10))
     def test_legacy_dml_check(self):
@@ -172,4 +172,4 @@ class TestPerformanceOptimizations:
         # Test UUID conversion optimization
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == test_uuid.bytes
+        assert result == str(test_uuid)

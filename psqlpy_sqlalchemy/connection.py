@@ -48,15 +48,17 @@ def _get_param_regex(name: str) -> re.Pattern[str]:
 
 # Python 3.11+: direct class comparison is faster than isinstance
 # Python 3.12+: comprehensions are inlined (PEP 709) - automatic optimization
+# Python 3.11+: direct class comparison is faster than isinstance
+# Python 3.12+: comprehensions are inlined (PEP 709) - automatic optimization
 # Python 3.13+: JIT compiler can optimize hot paths
 if _PY_VERSION >= (3, 11):
 
     def _convert_uuid(val: t.Any) -> t.Any:
-        return val.bytes if val.__class__ is _UUID_CLASS else val
+        return str(val) if val.__class__ is _UUID_CLASS else val
 else:
 
     def _convert_uuid(val: t.Any) -> t.Any:
-        return val.bytes if isinstance(val, uuid.UUID) else val
+        return str(val) if isinstance(val, uuid.UUID) else val
 
 
 # Optimized string operations for 3.12+
@@ -189,13 +191,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             return None
 
         def process_value(val: Any) -> Any:
+            # Keep UUIDs as strings for PostgreSQL compatibility
             if val.__class__ is uuid.UUID:
-                return val.bytes
-            if isinstance(val, str) and _UUID_PATTERN.match(val):
-                try:
-                    return uuid.UUID(val).bytes
-                except ValueError:
-                    return val
+                return str(val)
             return val
 
         if isinstance(parameters, dict):

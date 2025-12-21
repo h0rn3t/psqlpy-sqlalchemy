@@ -60,7 +60,7 @@ class TestPerformanceOptimizations:
         # Test UUID conversion optimization
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == test_uuid.bytes
+        assert result == str(test_uuid)
 
 
 class TestUtilityFunctionEdgeCases:
@@ -220,7 +220,7 @@ class TestPythonVersionCompatibility:
         # Test that functions still work with older Python versions
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == test_uuid.bytes
+        assert result == str(test_uuid)
 
         is_dml, upper_query = _check_dml("INSERT INTO table VALUES (1)")
         assert is_dml is True
@@ -232,7 +232,7 @@ class TestPythonVersionCompatibility:
             # Test that optimized path is used
             test_uuid = uuid.uuid4()
             result = _convert_uuid(test_uuid)
-            assert result == test_uuid.bytes
+            assert result == str(test_uuid)
 
         if _PY_VERSION >= (3, 12):
             # Test string optimization path
