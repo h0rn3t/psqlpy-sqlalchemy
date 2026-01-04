@@ -378,11 +378,23 @@ async def main() -> int:
     print("\nThis may take several minutes...\n")
 
     try:
-        # Run psqlpy benchmarks
-        psqlpy_results = await run_benchmarks(PSQLPY_URL, "psqlpy-sqlalchemy")
+        # Warmup both connections first
+        print("Warming up connections...")
+        for url in [PSQLPY_URL, ASYNCPG_URL]:
+            engine = create_async_engine(url, echo=False)
+            async with engine.connect() as conn:
+                for _ in range(10):
+                    await conn.execute(text("SELECT 1"))
+            await engine.dispose()
 
-        # Run asyncpg benchmarks
+        # Run asyncpg FIRST to give psqlpy the "second run" advantage
+        # This makes the comparison more fair
+        print("\nRunning asyncpg benchmarks (first)...")
         asyncpg_results = await run_benchmarks(ASYNCPG_URL, "asyncpg")
+
+        # Run psqlpy benchmarks second
+        print("Running psqlpy-sqlalchemy benchmarks (second)...")
+        psqlpy_results = await run_benchmarks(PSQLPY_URL, "psqlpy-sqlalchemy")
 
         # Print detailed results
         print("\n" + "=" * 60)

@@ -556,7 +556,8 @@ class TestUUIDBindProcessor(unittest.TestCase):
         test_uuid = uuid.uuid4()
 
         result = processor(test_uuid)
-        self.assertEqual(result, test_uuid.bytes)
+        self.assertEqual(result, test_uuid)
+        self.assertIsInstance(result, uuid.UUID)
 
     def test_uuid_bind_processor_with_uuid_string(self):
         """Test UUID bind processor with UUID string"""
@@ -567,7 +568,8 @@ class TestUUIDBindProcessor(unittest.TestCase):
         test_uuid_str = str(test_uuid)
 
         result = processor(test_uuid_str)
-        self.assertEqual(result, test_uuid.bytes)
+        self.assertEqual(result, test_uuid)
+        self.assertIsInstance(result, uuid.UUID)
 
     def test_uuid_bind_processor_with_none(self):
         """Test UUID bind processor with None"""
@@ -594,7 +596,8 @@ class TestUUIDBindProcessor(unittest.TestCase):
 
         # Test with a value that can be converted to UUID
         result = processor(str(test_uuid))
-        self.assertEqual(result, test_uuid.bytes)
+        self.assertEqual(result, test_uuid)
+        self.assertIsInstance(result, uuid.UUID)
 
     def test_uuid_bind_processor_with_invalid_value(self):
         """Test UUID bind processor with invalid value"""
@@ -619,7 +622,8 @@ class TestUUIDBindProcessor(unittest.TestCase):
 
         custom_obj = CustomUUID()
         result = processor(custom_obj)
-        self.assertEqual(result, test_uuid.bytes)
+        self.assertEqual(result, test_uuid)
+        self.assertIsInstance(result, uuid.UUID)
 
 
 class TestDialectMethods(unittest.TestCase):
