@@ -233,25 +233,28 @@ class _PGUUID(UUID[t.Any]):
     def bind_processor(
         self, dialect: t.Any
     ) -> t.Callable[[t.Any], t.Any] | None:
-        """Process UUID parameters for psqlpy compatibility."""
+        """Process UUID parameters for psqlpy compatibility.
 
-        def process(value: t.Any) -> bytes | None:
+        psqlpy uses the binary protocol which requires UUID values to be
+        passed as uuid.UUID objects (not strings). This ensures proper
+        binary serialization to PostgreSQL's UUID type.
+        """
+
+        def process(value: t.Any) -> uuid.UUID | None:
             if value is None:
                 return None
             if isinstance(value, uuid.UUID):
-                # Convert UUID objects to bytes for psqlpy
-                return value.bytes
+                # Already a UUID object, pass through
+                return value
             if isinstance(value, str):
-                # Validate and convert UUID strings to bytes
+                # Convert UUID string to UUID object
                 try:
-                    parsed_uuid = uuid.UUID(value)
-                    return parsed_uuid.bytes
+                    return uuid.UUID(value)
                 except ValueError:
                     raise ValueError(f"Invalid UUID string: {value}")
-            # For other types, try to convert to UUID first
+            # For other types, try to convert to UUID
             try:
-                parsed_uuid = uuid.UUID(str(value))
-                return parsed_uuid.bytes
+                return uuid.UUID(str(value))
             except ValueError:
                 raise ValueError(f"Cannot convert {value!r} to UUID")
 

@@ -56,10 +56,18 @@ class TestPerformanceOptimizations:
         assert callable(_convert_uuid)
         assert callable(_check_dml)
 
-        # Test UUID conversion optimization
+        # Test UUID conversion - now converts strings to UUID objects
         test_uuid = uuid.uuid4()
+        # UUID objects are passed through
         result = _convert_uuid(test_uuid)
-        assert result == str(test_uuid)
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
+
+        # UUID strings are converted to UUID objects
+        test_uuid_str = str(test_uuid)
+        result_str = _convert_uuid(test_uuid_str)
+        assert result_str == test_uuid
+        assert isinstance(result_str, uuid.UUID)
 
 
 class TestUtilityFunctionEdgeCases:
@@ -70,11 +78,21 @@ class TestUtilityFunctionEdgeCases:
         result = _convert_uuid(None)
         assert result is None
 
-    def test_convert_uuid_with_string(self):
-        """Test UUID conversion with string."""
+    def test_convert_uuid_with_non_uuid_string(self):
+        """Test UUID conversion with non-UUID string."""
         test_string = "not-a-uuid"
         result = _convert_uuid(test_string)
+        # Non-UUID strings are passed through unchanged
         assert result == test_string
+
+    def test_convert_uuid_with_uuid_string(self):
+        """Test UUID conversion with valid UUID string."""
+        test_uuid = uuid.uuid4()
+        test_string = str(test_uuid)
+        result = _convert_uuid(test_string)
+        # Valid UUID strings are converted to UUID objects
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
 
     def test_check_dml_with_whitespace(self):
         """Test DML detection with leading whitespace."""
@@ -216,10 +234,11 @@ class TestPythonVersionCompatibility:
         # Import functions that might have version-specific implementations
         from psqlpy_sqlalchemy.connection import _check_dml, _convert_uuid
 
-        # Test that functions still work with older Python versions
+        # UUID conversion is now version-independent
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == str(test_uuid)
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
 
         is_dml, upper_query = _check_dml("INSERT INTO table VALUES (1)")
         assert is_dml is True
@@ -228,10 +247,11 @@ class TestPythonVersionCompatibility:
         """Test optimizations for current Python version."""
         # Test that optimizations are applied based on current version
         if _PY_VERSION >= (3, 11):
-            # Test that optimized path is used
+            # UUID conversion is now the same for all versions
             test_uuid = uuid.uuid4()
             result = _convert_uuid(test_uuid)
-            assert result == str(test_uuid)
+            assert result == test_uuid
+            assert isinstance(result, uuid.UUID)
 
         if _PY_VERSION >= (3, 12):
             # Test string optimization path

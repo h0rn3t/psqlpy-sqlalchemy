@@ -69,7 +69,7 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_process_parameters_dict(self):
-        """Test parameter processing with dictionary"""
+        """Test parameter processing with dictionary (now a pass-through)"""
         test_uuid = uuid.uuid4()
         params = {
             "id": test_uuid,
@@ -80,21 +80,23 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
 
         result = self.cursor._process_parameters(params)
 
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["id"], str(test_uuid))
+        # _process_parameters is now a pass-through - dialect handles conversion
+        self.assertIs(result, params)
+        self.assertEqual(result["id"], test_uuid)
         self.assertEqual(result["name"], "test")
         self.assertEqual(result["uuid_str"], str(test_uuid))
         self.assertIsNone(result["null_val"])
 
     def test_process_parameters_list(self):
-        """Test parameter processing with list"""
+        """Test parameter processing with list (now a pass-through)"""
         test_uuid = uuid.uuid4()
         params = [test_uuid, "test", str(test_uuid), None]
 
         result = self.cursor._process_parameters(params)
 
-        self.assertIsInstance(result, list)
-        self.assertEqual(result[0], str(test_uuid))
+        # _process_parameters is now a pass-through - dialect handles conversion
+        self.assertIs(result, params)
+        self.assertEqual(result[0], test_uuid)
         self.assertEqual(result[1], "test")
         self.assertEqual(result[2], str(test_uuid))
         self.assertIsNone(result[3])
@@ -237,12 +239,12 @@ class TestAsyncAdaptPsqlpyCursor(unittest.TestCase):
             self.cursor.setinputsizes(10, 20)
 
     def test_process_parameters_single_value(self):
-        """Test parameter processing with single value (not dict/list)"""
+        """Test parameter processing with single value (now a pass-through)"""
         test_uuid = uuid.uuid4()
 
-        # Test with UUID
+        # Test with UUID - now passed through unchanged
         result = self.cursor._process_parameters(test_uuid)
-        self.assertEqual(result, str(test_uuid))
+        self.assertEqual(result, test_uuid)
 
         # Test with string
         result = self.cursor._process_parameters("test_string")

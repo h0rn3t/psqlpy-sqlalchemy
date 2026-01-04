@@ -19,15 +19,27 @@ class TestUtilityFunctions:
     """Test utility functions for better coverage."""
 
     def test_convert_uuid_with_uuid_object(self):
-        """Test UUID conversion with actual UUID object."""
+        """Test UUID conversion with actual UUID object (pass-through)."""
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == str(test_uuid)
+        # UUID objects are passed through unchanged
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
+
+    def test_convert_uuid_with_uuid_string(self):
+        """Test UUID conversion with UUID string (converts to UUID object)."""
+        test_uuid = uuid.uuid4()
+        test_str = str(test_uuid)
+        result = _convert_uuid(test_str)
+        # UUID strings are converted to UUID objects for psqlpy binary protocol
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
 
     def test_convert_uuid_with_non_uuid(self):
-        """Test UUID conversion with non-UUID object."""
+        """Test UUID conversion with non-UUID string."""
         test_value = "not-a-uuid"
         result = _convert_uuid(test_value)
+        # Non-UUID strings are passed through unchanged
         assert result == test_value
 
     def test_check_dml_insert(self):
@@ -95,13 +107,15 @@ class TestPythonVersionOptimizations:
 
     @patch("psqlpy_sqlalchemy.connection._PY_VERSION", (3, 10))
     def test_legacy_uuid_conversion(self):
-        """Test UUID conversion for older Python versions."""
-        # This tests the isinstance path for Python < 3.11
+        """Test UUID conversion is now version-independent."""
+        # UUID conversion is now the same for all Python versions
         from psqlpy_sqlalchemy.connection import _convert_uuid
 
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == str(test_uuid)
+        # UUID objects are passed through unchanged
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)
 
     @patch("psqlpy_sqlalchemy.connection._PY_VERSION", (3, 10))
     def test_legacy_dml_check(self):
@@ -168,7 +182,8 @@ class TestPerformanceOptimizations:
         assert callable(_convert_uuid)
         assert callable(_check_dml)
 
-        # Test UUID conversion optimization
+        # UUID conversion now converts strings to UUID objects
         test_uuid = uuid.uuid4()
         result = _convert_uuid(test_uuid)
-        assert result == str(test_uuid)
+        assert result == test_uuid
+        assert isinstance(result, uuid.UUID)

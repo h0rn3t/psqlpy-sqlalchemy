@@ -46,19 +46,24 @@ def _get_param_regex(name: str) -> re.Pattern[str]:
     return re.compile(rf":({re.escape(name)})(::[\w\[\]]+)?")
 
 
-# Python 3.11+: direct class comparison is faster than isinstance
-# Python 3.12+: comprehensions are inlined (PEP 709) - automatic optimization
-# Python 3.11+: direct class comparison is faster than isinstance
-# Python 3.12+: comprehensions are inlined (PEP 709) - automatic optimization
-# Python 3.13+: JIT compiler can optimize hot paths
-if _PY_VERSION >= (3, 11):
+# UUID conversion helper for psqlpy binary protocol compatibility
+def _convert_uuid(val: t.Any) -> t.Any:
+    """Convert UUID strings to UUID objects for psqlpy binary protocol.
 
-    def _convert_uuid(val: t.Any) -> t.Any:
-        return str(val) if val.__class__ is _UUID_CLASS else val
-else:
-
-    def _convert_uuid(val: t.Any) -> t.Any:
-        return str(val) if isinstance(val, uuid.UUID) else val
+    psqlpy uses the binary protocol which requires UUID values to be
+    passed as uuid.UUID objects (not strings). This function ensures
+    any UUID-formatted strings are converted to proper UUID objects.
+    UUID objects are passed through unchanged.
+    """
+    if isinstance(val, _UUID_CLASS):
+        # Already a UUID object, pass through
+        return val
+    if isinstance(val, str) and _UUID_PATTERN.match(val):
+        try:
+            return _UUID_CLASS(val)
+        except ValueError:
+            return val
+    return val
 
 
 # Optimized string operations for 3.12+
@@ -186,21 +191,16 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         self,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> t.Sequence[t.Any] | t.Mapping[str, Any] | None:
-        """Process parameters for type conversion (legacy)."""
+        """Process parameters for type conversion (legacy).
+
+        Note: UUID conversion is now handled by dialect's bind processor,
+        so this method is effectively a pass-through for most types.
+        """
         if parameters is None:
             return None
 
-        def process_value(val: Any) -> Any:
-            # Keep UUIDs as strings for PostgreSQL compatibility
-            if val.__class__ is uuid.UUID:
-                return str(val)
-            return val
-
-        if isinstance(parameters, dict):
-            return {k: process_value(v) for k, v in parameters.items()}
-        if isinstance(parameters, list | tuple):
-            return type(parameters)(process_value(v) for v in parameters)
-        return process_value(parameters)
+        # No type conversion needed - dialect handles it
+        return parameters
 
     def _convert_params_single_pass(
         self,
