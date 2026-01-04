@@ -1,4 +1,3 @@
-import asyncio
 import re
 import sys
 import time
@@ -9,7 +8,6 @@ from functools import lru_cache
 from typing import Any, Final
 
 import psqlpy
-from psqlpy import row_factories
 from sqlalchemy import util
 from sqlalchemy.connectors.asyncio import (
     AsyncAdapt_dbapi_connection,
@@ -22,14 +20,14 @@ from sqlalchemy.util.concurrency import await_only
 # Python version for conditional optimizations
 _PY_VERSION = sys.version_info[:2]
 
-# Compiled regex patterns - use Final for JIT optimization (3.13+)
+# Compiled regex patterns
 _PARAM_PATTERN: Final = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)(::[\w\[\]]+)?")
-_POSITIONAL_CHECK: Final = re.compile(r"\$\d+:$")
+_VALUES_PATTERN: Final = re.compile(r"VALUES\s*\([^)]*\)", re.IGNORECASE)
+# Keep UUID pattern for backward compatibility (tests import it)
 _UUID_PATTERN: Final = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
-_VALUES_PATTERN: Final = re.compile(r"VALUES\s*\([^)]*\)", re.IGNORECASE)
 
 # DML keywords as frozenset for O(1) lookup
 _DML_KEYWORDS: Final[frozenset[str]] = frozenset(
@@ -39,6 +37,10 @@ _DML_KEYWORDS: Final[frozenset[str]] = frozenset(
 # Pre-compute UUID class for faster comparison
 _UUID_CLASS: Final = uuid.UUID
 
+# Empty tuple/list constants to avoid allocations
+_EMPTY_TUPLE: Final[tuple[()]] = ()
+_EMPTY_DEQUE: Final[deque[t.Any]] = deque()
+
 
 @lru_cache(maxsize=256)
 def _get_param_regex(name: str) -> re.Pattern[str]:
@@ -46,41 +48,50 @@ def _get_param_regex(name: str) -> re.Pattern[str]:
     return re.compile(rf":({re.escape(name)})(::[\w\[\]]+)?")
 
 
-# UUID conversion helper for psqlpy binary protocol compatibility
+@lru_cache(maxsize=1024)
+def _analyze_query(query: str) -> tuple[bool, bool, str]:
+    """Cache query analysis: (is_dml_without_returning, has_named_params, uppercase).
+
+    Caching query analysis avoids repeated string operations for the same queries.
+    """
+    q_upper = query.upper()
+    start = q_upper.lstrip()[:6]
+    is_dml = start in _DML_KEYWORDS and "RETURNING" not in q_upper
+    has_colon = ":" in query
+    return is_dml, has_colon, q_upper
+
+
+def _check_dml(query: str) -> tuple[bool, str]:
+    """Check if query is DML and return uppercase version.
+
+    Backward compatibility wrapper around _analyze_query.
+    """
+    is_dml, _, q_upper = _analyze_query(query)
+    return is_dml, q_upper
+
+
 def _convert_uuid(val: t.Any) -> t.Any:
     """Convert UUID strings to UUID objects for psqlpy binary protocol.
 
-    psqlpy uses the binary protocol which requires UUID values to be
-    passed as uuid.UUID objects (not strings). This function ensures
-    any UUID-formatted strings are converted to proper UUID objects.
-    UUID objects are passed through unchanged.
+    Optimized: uses type() instead of isinstance() and length checks
+    instead of regex for faster non-UUID path.
     """
-    if isinstance(val, _UUID_CLASS):
-        # Already a UUID object, pass through
+    # Fast path: already UUID
+    if type(val) is _UUID_CLASS:
         return val
-    if isinstance(val, str) and _UUID_PATTERN.match(val):
+    # Check string with length-based UUID detection (no regex)
+    # UUID format: 8-4-4-4-12 = 36 chars with 4 dashes
+    if (
+        type(val) is str
+        and len(val) == 36
+        and val[8] == "-"
+        and val[13] == "-"
+    ):
         try:
             return _UUID_CLASS(val)
         except ValueError:
-            return val
+            pass
     return val
-
-
-# Optimized string operations for 3.12+
-if _PY_VERSION >= (3, 12):
-
-    def _check_dml(query: str) -> tuple[bool, str]:
-        """Check if query is DML and return uppercase version."""
-        q_upper = query.upper()
-        start = q_upper.lstrip()[:6]
-        return start in _DML_KEYWORDS and "RETURNING" not in q_upper, q_upper
-else:
-
-    def _check_dml(query: str) -> tuple[bool, str]:
-        q_upper = query.upper()
-        start = q_upper.lstrip()[:6]
-        is_dml = start in _DML_KEYWORDS and "RETURNING" not in q_upper
-        return is_dml, q_upper
 
 
 if t.TYPE_CHECKING:
@@ -131,18 +142,20 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         querystring: str,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> None:
-        """Execute a prepared statement."""
+        """Execute a query with optimized paths for DML and SELECT."""
         if not self._adapt_connection._started:
             await self._adapt_connection._start_transaction()
 
-        converted_query, converted_params = self._convert_params_single_pass(
+        converted_query, converted_params = self._convert_params(
             querystring, parameters
         )
 
         try:
-            # DML without RETURNING: use execute() directly
-            is_dml, _ = _check_dml(converted_query)
+            # Use cached query analysis
+            is_dml, _, _ = _analyze_query(converted_query)
+
             if is_dml:
+                # DML without RETURNING: use execute() directly
                 await self._connection.execute(
                     converted_query, converted_params, prepared=True
                 )
@@ -151,17 +164,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 self._rows = deque()
                 return
 
-            # SELECT/complex: use prepare() for column metadata
-            prepared_stmt = await self._connection.prepare(
-                querystring=converted_query,
-                parameters=converted_params,
-            )
-
-            self._description = [
-                (col.name, col.table_oid, None, None, None, None, None)
-                for col in prepared_stmt.columns()
-            ]
-
+            # Server-side cursor path
             if self.server_side:
                 self._cursor = self._connection.cursor(
                     converted_query,
@@ -169,16 +172,31 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
                 )
                 await self._cursor.start()
                 self._rowcount = -1
+                self._description = None
                 return
 
-            results = await prepared_stmt.execute()
-
-            # Use tuple unpacking directly - faster in Python 3.11+
-            self._rows = deque(
-                tuple(v for _, v in row)
-                for row in results.row_factory(row_factories.tuple_row)
+            # SELECT: use fetch() for single round-trip
+            result = await self._connection.fetch(
+                converted_query, converted_params, prepared=True
             )
-            self._rowcount = len(self._rows)
+
+            # Get raw dict results and convert to tuples
+            raw_rows = result.result()
+
+            if raw_rows:
+                # Build description from first row's keys
+                first_row = raw_rows[0]
+                self._description = [
+                    (key, None, None, None, None, None, None)
+                    for key in first_row
+                ]
+                # Convert dict rows to value tuples
+                self._rows = deque(tuple(row.values()) for row in raw_rows)
+                self._rowcount = len(raw_rows)
+            else:
+                self._description = []
+                self._rows = deque()
+                self._rowcount = 0
 
         except Exception:
             self._description = None
@@ -187,40 +205,33 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             self._adapt_connection._connection_valid = False
             raise
 
-    def _process_parameters(
-        self,
-        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
-    ) -> t.Sequence[t.Any] | t.Mapping[str, Any] | None:
-        """Process parameters for type conversion (legacy).
-
-        Note: UUID conversion is now handled by dialect's bind processor,
-        so this method is effectively a pass-through for most types.
-        """
-        if parameters is None:
-            return None
-
-        # No type conversion needed - dialect handles it
-        return parameters
-
-    def _convert_params_single_pass(
+    def _convert_params(
         self,
         querystring: str,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> tuple[str, list[Any] | None]:
-        """Single-pass conversion: named→positional + UUID→bytes."""
+        """Convert parameters: named→positional + UUID handling.
+
+        Optimized with early exits and minimal allocations.
+        """
         if parameters is None:
             return querystring, None
 
         # Fast path: already positional (list/tuple)
         if isinstance(parameters, list | tuple):
+            # Only convert if non-empty
+            if not parameters:
+                return querystring, []
             return querystring, [_convert_uuid(v) for v in parameters]
 
         # Dict parameters: need named→positional conversion
         if not isinstance(parameters, dict):
             return querystring, None
 
-        # Fast path: no named params in query
-        if ":" not in querystring:
+        # Check for named params using cached analysis
+        _, has_colon, _ = _analyze_query(querystring)
+        if not has_colon:
+            # No named params possible
             return querystring, [_convert_uuid(v) for v in parameters.values()]
 
         # Find all parameter references
@@ -254,12 +265,21 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         return converted_query, converted_params
 
+    def _process_parameters(
+        self,
+        parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
+    ) -> t.Sequence[t.Any] | t.Mapping[str, Any] | None:
+        """Process parameters for type conversion (legacy compatibility)."""
+        if parameters is None:
+            return None
+        return parameters
+
     def _convert_named_params_with_casting(
         self,
         querystring: str,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> tuple[str, t.Sequence[t.Any] | t.Mapping[str, Any] | None]:
-        """Convert named parameters to positional (without UUID conversion)."""
+        """Convert named parameters to positional (legacy compatibility)."""
         if parameters is None or not isinstance(parameters, dict):
             return querystring, parameters
 
@@ -290,6 +310,9 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
 
         return converted_query, converted_params
 
+    # Alias for backward compatibility
+    _convert_params_single_pass = _convert_params
+
     @property
     def description(self) -> "_DBAPICursorDescription | None":
         return self._description
@@ -311,11 +334,11 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         operation: str,
         seq_of_parameters: t.Sequence[t.Sequence[t.Any]],
     ) -> None:
-        """Execute a batch of parameter sets."""
+        """Execute a batch of parameter sets with multi-value INSERT optimization."""
         if not self._adapt_connection._started:
             await self._adapt_connection._start_transaction()
 
-        # Fast conversion using comprehension (inlined in 3.12+)
+        # Fast conversion
         converted_seq = [
             [
                 _convert_uuid(v)
@@ -324,8 +347,10 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
             for p in seq_of_parameters
         ]
 
-        # INSERT: multi-value optimization
-        is_dml, q_upper = _check_dml(operation)
+        # Use cached query analysis
+        _, _, q_upper = _analyze_query(operation)
+
+        # INSERT: multi-value optimization for batches > 1
         if len(converted_seq) > 1 and q_upper.lstrip().startswith("INSERT"):
             try:
                 idx = 1
@@ -358,8 +383,7 @@ class AsyncAdapt_psqlpy_cursor(AsyncAdapt_dbapi_cursor):
         operation: t.Any,
         parameters: t.Sequence[t.Any] | t.Mapping[str, Any] | None = None,
     ) -> None:
-        # Auto-detect batch operations: if parameters is a list of dicts/tuples,
-        # treat it as executemany for better performance
+        # Auto-detect batch operations for better performance
         if (
             isinstance(parameters, list)
             and len(parameters) > 1
@@ -401,16 +425,35 @@ class AsyncAdapt_psqlpy_ss_cursor(
     ) -> tuple[tuple[Any, ...], ...]:
         """Convert psqlpy QueryResult to tuple of tuples."""
         if result is None:
-            return ()
+            return _EMPTY_TUPLE
 
         try:
-            return tuple(
-                tuple(value for _, value in row)
-                for row in result.row_factory(row_factories.tuple_row)
-            )
+            # Try row_factory first for tuple_row format compatibility
+            if hasattr(result, "row_factory"):
+                from psqlpy import row_factories
+
+                rows = result.row_factory(row_factories.tuple_row)
+                if rows:
+                    # Check if it's the (name, value) tuple format
+                    first = rows[0]
+                    if (
+                        first
+                        and isinstance(first[0], tuple)
+                        and len(first[0]) == 2
+                    ):
+                        return tuple(
+                            tuple(value for _, value in row) for row in rows
+                        )
+
+            # Fallback to result() which returns list of dicts
+            if hasattr(result, "result"):
+                raw = result.result()
+                if raw and isinstance(raw[0], dict):
+                    return tuple(tuple(row.values()) for row in raw)
+
+            return _EMPTY_TUPLE
         except Exception:
-            # Return empty tuple on conversion error
-            return ()
+            return _EMPTY_TUPLE
 
     def close(self) -> None:
         """Close the cursor and release resources."""
@@ -418,7 +461,6 @@ class AsyncAdapt_psqlpy_ss_cursor(
             try:
                 self._cursor.close()
             except Exception:
-                # Ignore close errors
                 pass
             finally:
                 self._cursor = None
@@ -469,7 +511,6 @@ class AsyncAdapt_psqlpy_ss_cursor(
             try:
                 result = self.await_(iterator.__anext__())
                 rows = self._convert_result(result=result)
-                # Yield individual rows, not the entire result
                 yield from rows
             except StopAsyncIteration:
                 break
@@ -493,7 +534,6 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         "_transaction",
         "_connection_valid",
         "_last_ping_time",
-        "_execute_mutex",
         "deferrable",
         "isolation_level",
         "readonly",
@@ -515,12 +555,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         self._last_ping_time = 0.0
         self._invalidate_schema_cache_asof = time.time()
 
-        # Async lock for coordinating concurrent operations
-        self._execute_mutex = asyncio.Lock()
-
-        # LRU cache for prepared statements. Defaults to 100 statements per
-        # connection. The cache is on a per-connection basis, stored within
-        # connections pooled by the connection pool.
+        # LRU cache for prepared statements
         self._prepared_statement_cache: util.LRUCache[t.Any, t.Any] | None
         if prepared_statement_cache_size > 0:
             self._prepared_statement_cache = util.LRUCache(
@@ -529,30 +564,20 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
         else:
             self._prepared_statement_cache = None
 
-        # Prepared statement name function (for compatibility with asyncpg)
         self._prepared_statement_name_func = self._default_name_func
-
-        # Legacy query cache (kept for compatibility)
         self._query_cache: dict[str, t.Any] = {}
         self._cache_max_size = prepared_statement_cache_size
 
     async def _check_type_cache_invalidation(
         self, invalidate_timestamp: float
     ) -> None:
-        """Check if type cache needs invalidation.
-
-        Similar to asyncpg's implementation, tracks schema changes
-        that may invalidate cached type information.
-        """
+        """Check if type cache needs invalidation."""
         if invalidate_timestamp > self._invalidate_schema_cache_asof:
-            # psqlpy doesn't have reload_schema_state like asyncpg,
-            # but we track the invalidation timestamp for consistency
             self._invalidate_schema_cache_asof = invalidate_timestamp
 
     async def _start_transaction(self) -> None:
         """Start a new transaction."""
         if self._transaction is not None:
-            # Transaction already started
             return
 
         try:
@@ -597,15 +622,12 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
 
     def ping(self, reconnect: t.Any = None) -> t.Any:
         """Ping the connection to check if it's alive"""
-        import time
-
         current_time = time.time()
         # Only ping if more than 30 seconds since last ping
         if current_time - self._last_ping_time < 30:
             return self._connection_valid
 
         try:
-            # Simple query to test connection
             await_only(self._connection.execute("SELECT 1"))
             self._connection_valid = True
             self._last_ping_time = current_time
@@ -620,9 +642,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
 
     def _cache_query(self, query_key: str, prepared_stmt: t.Any) -> None:
         """Cache a prepared statement with LRU-like eviction."""
-        # Simple LRU: if cache is full, remove oldest entry
         if len(self._query_cache) >= self._cache_max_size:
-            # Remove first (oldest) item
             self._query_cache.pop(next(iter(self._query_cache)))
         self._query_cache[query_key] = prepared_stmt
 
@@ -643,11 +663,7 @@ class AsyncAdapt_psqlpy_connection(AsyncAdapt_dbapi_connection):
 
     @staticmethod
     def _default_name_func() -> None:
-        """Default prepared statement name function.
-
-        Returns None to let psqlpy auto-generate statement names.
-        Compatible with asyncpg's implementation.
-        """
+        """Default prepared statement name function."""
         return
 
 
